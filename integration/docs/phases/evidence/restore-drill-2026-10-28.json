@@ -1,0 +1,17 @@
+{
+  "date_utc": "2026-10-28",
+  "environment": "Docker Desktop macOS arm64, amd64 images emulated; dev stack, tiny dataset (1 task, 2 jobs, 1 annotation)",
+  "backup_seconds": 23.6,
+  "restore_seconds_to_api": 30.2,
+  "damage_applied": ["deleted CVAT task via REST", "deleted all integration labeling_job rows for the tenant"],
+  "matches_baseline": {"portal_jobs": true, "cvat_job_states": true, "frame0_sha256": true, "shapes_job0": true, "cvat_task_id": true, "slug": true},
+  "reconcile_after_restore": {"checked": 2, "changed": 0, "missing": 0, "errors": 0},
+  "all_match": true,
+  "limitations": [
+    "RPO is the backup interval; no schedule exists yet (Phase 6). The 23.6 s 'window' in the raw output is only backup duration.",
+    "Backup stops CVAT API/workers (~25 s here) for cross-store consistency; it is not an online backup.",
+    "Kvrocks cache/queue DB is not backed up (transient: RQ queues, chunk cache); in-flight jobs at backup time are lost and must be re-run by the integration's retry/reconcile.",
+    "S3-resident media is out of scope of this script (local volume only); object-reference integrity is checked via media sha256 in labeling_task.clip.",
+    "Dataset is tiny; restore time at real scale is a Phase 6 measurement."
+  ]
+}

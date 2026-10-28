@@ -1,0 +1,20 @@
+# Swaps every cvat/server service for the guarded overlay image.
+services:
+  cvat_server:
+    image: ${GUARD_IMAGE:-cvat-labeling/server:v2.80.0-guard1}
+  cvat_worker_utils:
+    image: ${GUARD_IMAGE:-cvat-labeling/server:v2.80.0-guard1}
+  cvat_worker_import:
+    image: ${GUARD_IMAGE:-cvat-labeling/server:v2.80.0-guard1}
+  cvat_worker_export:
+    image: ${GUARD_IMAGE:-cvat-labeling/server:v2.80.0-guard1}
+  cvat_worker_annotation:
+    image: ${GUARD_IMAGE:-cvat-labeling/server:v2.80.0-guard1}
+  cvat_worker_webhooks:
+    image: ${GUARD_IMAGE:-cvat-labeling/server:v2.80.0-guard1}
+  cvat_worker_quality_reports:
+    image: ${GUARD_IMAGE:-cvat-labeling/server:v2.80.0-guard1}
+  cvat_worker_chunks:
+    image: ${GUARD_IMAGE:-cvat-labeling/server:v2.80.0-guard1}
+  cvat_worker_consensus:
+    image: ${GUARD_IMAGE:-cvat-labeling/server:v2.80.0-guard1}

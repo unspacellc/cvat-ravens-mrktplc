@@ -1,0 +1,163 @@
+openapi: 3.1.0
+info:
+  title: Labeling API (integration contract v1)
+  version: 1.0.0
+  description: >
+    Routes to implement under the marketplace `/api/v1` prefix. Mutating commands require `Idempotency-Key`
+    (scoped to tenant+action, bound to a request hash; same key + different input = 409 `idempotency_conflict`).
+    Tenant is always resolved server-side from the authenticated principal, never from a client field.
+servers: [{url: /api/v1}]
+paths:
+  /labeling/batches:
+    post:
+      operationId: createBatch
+      parameters: [{$ref: '#/components/parameters/IdempotencyKey'}]
+      requestBody: {required: true, content: {application/json: {schema: {$ref: '#/components/schemas/CreateBatch'}}}}
+      responses:
+        '202': {description: Accepted, content: {application/json: {schema: {$ref: '#/components/schemas/OperationAccepted'}}}}
+        '403': {$ref: '#/components/responses/Error'}
+        '409': {$ref: '#/components/responses/Error'}
+        '422': {$ref: '#/components/responses/Error'}
+  /labeling/batches/{batch_id}:
+    get:
+      operationId: getBatch
+      parameters: [{$ref: '#/components/parameters/BatchId'}]
+      responses:
+        '200': {description: Batch detail incl. sync age and operation errors, content: {application/json: {schema: {$ref: '#/components/schemas/Batch'}}}}
+        '404': {$ref: '#/components/responses/Error'}
+  /labeling/jobs:
+    get:
+      operationId: listJobs
+      description: Tenant-scoped inbox/board projection.
+      parameters:
+        - {name: assignee, in: query, schema: {type: string}}
+        - {name: status, in: query, schema: {$ref: '#/components/schemas/PortalStatus'}}
+        - {name: batch_id, in: query, schema: {type: string, format: uuid}}
+        - {name: cursor, in: query, schema: {type: string}}
+        - {name: limit, in: query, schema: {type: integer, minimum: 1, maximum: 200, default: 50}}
+      responses:
+        '200': {description: Page of jobs, content: {application/json: {schema: {$ref: '#/components/schemas/JobPage'}}}}
+  /labeling/jobs/{job_id}/editor-launch:
+    post:
+      operationId: editorLaunch
+      parameters: [{$ref: '#/components/parameters/JobId'}]
+      responses:
+        '200': {description: Allowlisted launch destination (top-level navigation), content: {application/json: {schema: {$ref: '#/components/schemas/EditorLaunch'}}}}
+        '403': {$ref: '#/components/responses/Error'}
+  /labeling/jobs/{job_id}/transitions:
+    post:
+      operationId: transitionJob
+      parameters: [{$ref: '#/components/parameters/JobId'}, {$ref: '#/components/parameters/IdempotencyKey'}]
+      requestBody: {required: true, content: {application/json: {schema: {$ref: '#/components/schemas/Transition'}}}}
+      responses:
+        '200': {description: Transitioned, content: {application/json: {schema: {$ref: '#/components/schemas/Job'}}}}
+        '409': {$ref: '#/components/responses/Error'}
+  /labeling/batches/{batch_id}/prelabel-runs:
+    post:
+      operationId: startPrelabelRun
+      parameters: [{$ref: '#/components/parameters/BatchId'}, {$ref: '#/components/parameters/IdempotencyKey'}]
+      requestBody: {required: true, content: {application/json: {schema: {$ref: '#/components/schemas/StartPrelabel'}}}}
+      responses:
+        '202': {description: Accepted, content: {application/json: {schema: {$ref: '#/components/schemas/OperationAccepted'}}}}
+  /labeling/batches/{batch_id}/send-offs:
+    post:
+      operationId: startSendOff
+      parameters: [{$ref: '#/components/parameters/BatchId'}, {$ref: '#/components/parameters/IdempotencyKey'}]
+      responses:
+        '202': {description: Accepted; replay with the same key returns the same operation, content: {application/json: {schema: {$ref: '#/components/schemas/OperationAccepted'}}}}
+        '409': {$ref: '#/components/responses/Error'}
+  /labeling/operations/{operation_id}:
+    get:
+      operationId: getOperation
+      parameters: [{name: operation_id, in: path, required: true, schema: {type: string, format: uuid}}]
+      responses:
+        '200': {description: Operation, content: {application/json: {schema: {$ref: '#/components/schemas/Operation'}}}}
+  /labeling/webhooks/cvat:
+    post:
+      operationId: cvatWebhook
+      description: >
+        Authenticated by `X-Signature-256` (HMAC-SHA256 over the raw body), not by a user session. 2xx only after the
+        delivery is durably stored. 4xx is NOT retried by CVAT, so reject only malformed/unsigned requests.
+      parameters: [{name: X-Signature-256, in: header, required: true, schema: {type: string, pattern: '^sha256=[0-9a-f]{64}$'}}]
+      requestBody: {required: true, content: {application/json: {schema: {type: object}}}}
+      responses:
+        '202': {description: Stored}
+        '401': {$ref: '#/components/responses/Error'}
+components:
+  parameters:
+    IdempotencyKey: {name: Idempotency-Key, in: header, required: true, schema: {type: string, minLength: 8, maxLength: 128}}
+    BatchId: {name: batch_id, in: path, required: true, schema: {type: string, format: uuid}}
+    JobId: {name: job_id, in: path, required: true, schema: {type: string, format: uuid}}
+  responses:
+    Error: {description: Error, content: {application/json: {schema: {$ref: 'schemas/error.schema.json'}}}}
+  schemas:
+    PortalStatus: {enum: [provisioning, created, prelabeling, annotating, in_review, rework, approved, sent_off]}
+    OperationState: {enum: [queued, running, retrying, failed, cancelled, succeeded]}
+    OperationAccepted:
+      type: object
+      required: [operation_id]
+      properties: {operation_id: {type: string, format: uuid}, batch_id: {type: string, format: uuid}}
+    Operation:
+      type: object
+      required: [id, kind, state, attempts]
+      properties:
+        id: {type: string, format: uuid}
+        kind: {enum: [provision_batch, prelabel, snapshot, send_off, reconcile]}
+        state: {$ref: '#/components/schemas/OperationState'}
+        attempts: {type: integer}
+        retryable: {type: boolean}
+        error: {type: [object, 'null']}
+        result: {type: [object, 'null']}
+    CreateBatch:
+      type: object
+      required: [name, media, label_schema_version_id, review_policy]
+      additionalProperties: false
+      properties:
+        name: {type: string}
+        media: {type: array, minItems: 1, items: {$ref: 'schemas/media_reference.schema.json'}}
+        label_schema_version_id: {type: string, format: uuid}
+        review_policy: {type: object, required: [mode], properties: {mode: {const: independent_all}}}
+        instructions: {type: string}
+        priority: {type: integer}
+        due_date: {type: [string, 'null'], format: date-time}
+        segment_size: {type: integer, minimum: 1}
+    Batch:
+      type: object
+      required: [id, status, tasks, sync_age_s]
+      properties:
+        id: {type: string, format: uuid}
+        status: {$ref: '#/components/schemas/PortalStatus'}
+        tasks: {type: array, items: {type: object}}
+        sync_age_s: {type: [number, 'null']}
+        operations: {type: array, items: {$ref: '#/components/schemas/Operation'}}
+    Job:
+      type: object
+      required: [id, batch_id, status, annotation_revision, revision]
+      properties:
+        id: {type: string, format: uuid}
+        batch_id: {type: string, format: uuid}
+        status: {$ref: '#/components/schemas/PortalStatus'}
+        assignee: {type: [string, 'null']}
+        annotation_revision: {type: integer}
+        revision: {type: integer, description: Optimistic concurrency token for transitions}
+        cvat: {type: object, properties: {stage: {type: string}, state: {type: string}, synced_at: {type: string, format: date-time}}}
+    JobPage:
+      type: object
+      required: [items]
+      properties: {items: {type: array, items: {$ref: '#/components/schemas/Job'}}, next_cursor: {type: [string, 'null']}}
+    EditorLaunch:
+      type: object
+      required: [url]
+      properties: {url: {type: string, format: uri}, expires_at: {type: string, format: date-time}}
+    Transition:
+      type: object
+      required: [action, expected_revision]
+      additionalProperties: false
+      properties:
+        action: {enum: [submit, approve, reject, reopen]}
+        expected_revision: {type: integer}
+        reason: {type: string}
+    StartPrelabel:
+      type: object
+      required: [model_id, task_ids]
+      properties: {model_id: {type: string}, task_ids: {type: array, minItems: 1, items: {type: string, format: uuid}}, settings: {type: object}}

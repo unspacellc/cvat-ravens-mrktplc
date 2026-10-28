@@ -1,0 +1,9 @@
+.cvat-src/
+.venv/
+__pycache__/
+.pytest_cache/
+.ruff_cache/
+*.env
+!*.env.example
+fixtures/generated/
+backups/

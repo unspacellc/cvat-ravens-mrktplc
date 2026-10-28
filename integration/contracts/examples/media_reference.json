@@ -1,0 +1,36 @@
+{
+  "source_asset_id": "asset-1",
+  "storage": {
+    "bucket": "yard-media",
+    "key": "t1/a.mp4",
+    "version_id": null
+  },
+  "sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+  "clip": {
+    "start_offset_s": 12.5,
+    "duration_s": 4.0
+  },
+  "dimensions": {
+    "width": 320,
+    "height": 240
+  },
+  "frame_map": {
+    "schema_version": 1,
+    "pts_s": [
+      0.0,
+      0.033333,
+      0.066667,
+      0.1,
+      0.133333
+    ],
+    "clip_start_offset_s": 12.5,
+    "start_frame": 0,
+    "step": 1,
+    "variable_frame_rate": false
+  },
+  "telemetry": {
+    "status": "aligned",
+    "reason": null,
+    "srt_sha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+  }
+}

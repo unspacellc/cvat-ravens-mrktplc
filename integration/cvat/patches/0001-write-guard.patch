@@ -1,0 +1,486 @@
+diff --git a/cvat/apps/dataset_manager/task.py b/cvat/apps/dataset_manager/task.py
+index f66f71f72..afa0016b6 100644
+--- a/cvat/apps/dataset_manager/task.py
++++ b/cvat/apps/dataset_manager/task.py
+@@ -34,6 +34,7 @@ from cvat.apps.engine.log import DatasetLogManager
+ from cvat.apps.engine.plugins import plugin_decorator
+ from cvat.apps.engine.utils import av_scan_paths, take_by
+ from cvat.apps.events.handlers import handle_annotations_change
++from cvat.apps.labeling_guard.guard import guard_task_writes, task_id_of_job
+ from cvat.apps.profiler import silk_profile
+ from cvat.utils import django_database as db_utils
+ 
+@@ -1280,6 +1281,7 @@ def get_job_data(pk, *, streaming: bool = False):
+ 
+ @silk_profile(name="POST job data")
+ @transaction.atomic
++@guard_task_writes(lambda pk, *a, db_job=None, **k: task_id_of_job(pk, db_job))
+ def put_job_data(pk, data: AnnotationIR | dict, *, db_job: models.Job | None = None):
+     annotation = JobAnnotation(pk, db_job=db_job)
+     annotation.put(data)
+@@ -1290,6 +1292,7 @@ def put_job_data(pk, data: AnnotationIR | dict, *, db_job: models.Job | None = N
+ @silk_profile(name="UPDATE job data")
+ @plugin_decorator
+ @transaction.atomic
++@guard_task_writes(lambda pk, *a, db_job=None, **k: task_id_of_job(pk, db_job))
+ def patch_job_data(
+     pk, data: AnnotationIR | dict, action: PatchAction, *, db_job: models.Job | None = None
+ ):
+@@ -1306,6 +1309,7 @@ def patch_job_data(
+ 
+ @silk_profile(name="DELETE job data")
+ @transaction.atomic
++@guard_task_writes(lambda pk, *a, db_job=None, **k: task_id_of_job(pk, db_job))
+ def delete_job_data(pk, *, db_job: models.Job | None = None):
+     annotation = JobAnnotation(pk, db_job=db_job)
+     annotation.delete()
+@@ -1342,6 +1346,7 @@ def get_task_data(pk):
+ 
+ @silk_profile(name="POST task data")
+ @transaction.atomic
++@guard_task_writes(lambda pk, *a, **k: pk)
+ def put_task_data(pk, data):
+     annotation = TaskAnnotation(pk)
+     annotation.put(data)
+@@ -1351,6 +1356,7 @@ def put_task_data(pk, data):
+ 
+ @silk_profile(name="UPDATE task data")
+ @transaction.atomic
++@guard_task_writes(lambda pk, *a, **k: pk)
+ def patch_task_data(pk, data, action):
+     annotation = TaskAnnotation(pk)
+     if action == PatchAction.CREATE:
+@@ -1365,6 +1371,7 @@ def patch_task_data(pk, data, action):
+ 
+ @silk_profile(name="DELETE task data")
+ @transaction.atomic
++@guard_task_writes(lambda pk, *a, **k: pk)
+ def delete_task_data(pk):
+     annotation = TaskAnnotation(pk)
+     annotation.delete()
+@@ -1391,6 +1398,7 @@ def export_task(
+ 
+ 
+ @transaction.atomic
++@guard_task_writes(lambda src_file, task_id, *a, **k: task_id)
+ def import_task_annotations(
+     src_file,
+     task_id,
+@@ -1418,6 +1426,7 @@ def import_task_annotations(
+ 
+ 
+ @transaction.atomic
++@guard_task_writes(lambda src_file, job_id, *a, **k: task_id_of_job(job_id))
+ def import_job_annotations(
+     src_file,
+     job_id,
+diff --git a/cvat/apps/labeling_guard/__init__.py b/cvat/apps/labeling_guard/__init__.py
+new file mode 100644
+index 000000000..e69de29bb
+diff --git a/cvat/apps/labeling_guard/adapters.py b/cvat/apps/labeling_guard/adapters.py
+new file mode 100644
+index 000000000..e55da1a9c
+--- /dev/null
++++ b/cvat/apps/labeling_guard/adapters.py
+@@ -0,0 +1,22 @@
++# Copyright (C) CVAT.ai Corporation
++#
++# SPDX-License-Identifier: MIT
++
++from django.conf import settings
++from django.utils.http import url_has_allowed_host_and_scheme
++
++from allauth.core import context
++
++from cvat.apps.iam.adapters import DefaultAccountAdapterEx
++
++
++class StrictReturnAccountAdapter(DefaultAccountAdapterEx):
++    """Return URLs may only target this host or explicit LABELING_ALLOWED_RETURN_HOSTS.
++
++    Upstream allauth also trusts every ALLOWED_HOSTS entry, and the stock compose sets ALLOWED_HOSTS='*',
++    which would make any `next=https://attacker` an open redirect after login.
++    """
++
++    def is_safe_url(self, url: str) -> bool:
++        allowed = {context.request.get_host(), *getattr(settings, "LABELING_ALLOWED_RETURN_HOSTS", ())}
++        return url_has_allowed_host_and_scheme(url, allowed_hosts=allowed)
+diff --git a/cvat/apps/labeling_guard/apps.py b/cvat/apps/labeling_guard/apps.py
+new file mode 100644
+index 000000000..64985cb4c
+--- /dev/null
++++ b/cvat/apps/labeling_guard/apps.py
+@@ -0,0 +1,9 @@
++# Copyright (C) CVAT.ai Corporation
++#
++# SPDX-License-Identifier: MIT
++
++from django.apps import AppConfig
++
++
++class LabelingGuardConfig(AppConfig):
++    name = "cvat.apps.labeling_guard"
+diff --git a/cvat/apps/labeling_guard/guard.py b/cvat/apps/labeling_guard/guard.py
+new file mode 100644
+index 000000000..0c7050a9c
+--- /dev/null
++++ b/cvat/apps/labeling_guard/guard.py
+@@ -0,0 +1,76 @@
++# Copyright (C) CVAT.ai Corporation
++#
++# SPDX-License-Identifier: MIT
++
++"""Server-side write freeze.
++
++Race-safety: writers take a *shared* transaction advisory lock on the task id and then check for a
++TaskFreeze row inside the same transaction; the freezer takes the *exclusive* lock, so it waits for
++in-flight writers to commit and every later writer sees the freeze row.
++"""
++
++import functools
++
++from django.db import connection, transaction
++
++from cvat.apps.engine import models
++
++from .models import TaskFreeze
++
++_LOCK_CLASS = 0x4C42  # "LB"; namespaces our advisory locks
++
++
++class TaskFrozenError(Exception):
++    def __init__(self, task_id: int):
++        super().__init__(f"task {task_id} is frozen by a batch send-off")
++        self.task_id = task_id
++
++
++def _advisory(fn: str, task_id: int) -> None:
++    with connection.cursor() as cur:
++        cur.execute(f"SELECT {fn}(%s, %s)", [_LOCK_CLASS, task_id])
++
++
++def assert_writable(task_id: int) -> None:
++    assert connection.in_atomic_block, "assert_writable must run inside the writer's transaction"
++    _advisory("pg_advisory_xact_lock_shared", task_id)
++    if TaskFreeze.objects.filter(pk=task_id).exists():
++        raise TaskFrozenError(task_id)
++
++
++def is_frozen(task_id: int) -> bool:
++    return TaskFreeze.objects.filter(pk=task_id).exists()
++
++
++def freeze(task_id: int, send_off_id: str) -> TaskFreeze:
++    with transaction.atomic():
++        _advisory("pg_advisory_xact_lock", task_id)  # waits for in-flight writers
++        obj, _ = TaskFreeze.objects.get_or_create(task_id=task_id, defaults={"send_off_id": send_off_id})
++        return obj
++
++
++def unfreeze(task_id: int) -> None:
++    with transaction.atomic():
++        _advisory("pg_advisory_xact_lock", task_id)
++        TaskFreeze.objects.filter(pk=task_id).delete()
++
++
++def task_id_of_job(job_id: int, db_job: "models.Job | None" = None) -> int:
++    if db_job is not None:
++        return db_job.segment.task_id
++    return models.Job.objects.values_list("segment__task_id", flat=True).get(pk=job_id)
++
++
++def guard_task_writes(task_id_getter):
++    """Decorator for @transaction.atomic annotation writers. Apply *outside* @transaction.atomic's
++    inner function but inside the atomic block, i.e. place it below @transaction.atomic."""
++
++    def deco(fn):
++        @functools.wraps(fn)
++        def wrapper(*args, **kwargs):
++            assert_writable(task_id_getter(*args, **kwargs))
++            return fn(*args, **kwargs)
++
++        return wrapper
++
++    return deco
+diff --git a/cvat/apps/labeling_guard/middleware.py b/cvat/apps/labeling_guard/middleware.py
+new file mode 100644
+index 000000000..e4cd00d40
+--- /dev/null
++++ b/cvat/apps/labeling_guard/middleware.py
+@@ -0,0 +1,50 @@
++# Copyright (C) CVAT.ai Corporation
++#
++# SPDX-License-Identifier: MIT
++
++"""Blocks mutating REST requests against frozen tasks, for every credential type (sessions included).
++
++Annotation writes are additionally guarded atomically inside dataset_manager; this layer covers
++workflow/metadata/data/task mutations (job stage/state/assignee, task edit/delete, data upload, ...).
++Hiding UI is not the control: this runs server-side before any view.
++"""
++
++import re
++
++from django.http import JsonResponse
++
++from cvat.apps.engine import models
++
++from .guard import TaskFrozenError, is_frozen
++
++_SAFE = {"GET", "HEAD", "OPTIONS"}
++_TASK_RE = re.compile(r"^/api/tasks/(\d+)(?:/|$)")
++_JOB_RE = re.compile(r"^/api/jobs/(\d+)(?:/|$)")
++_LABEL_RE = re.compile(r"^/api/labels/(\d+)(?:/|$)")
++
++
++class FrozenTaskMiddleware:
++    def __init__(self, get_response):
++        self.get_response = get_response
++
++    @staticmethod
++    def _task_id(path: str) -> int | None:
++        if m := _TASK_RE.match(path):
++            return int(m[1])
++        if m := _JOB_RE.match(path):
++            return models.Job.objects.values_list("segment__task_id", flat=True).filter(pk=int(m[1])).first()
++        if m := _LABEL_RE.match(path):
++            return models.Label.objects.values_list("task_id", flat=True).filter(pk=int(m[1])).first()
++        return None
++
++    def __call__(self, request):
++        if request.method not in _SAFE and (task_id := self._task_id(request.path)) is not None:
++            if is_frozen(task_id):
++                return JsonResponse({"detail": f"task {task_id} is frozen by a batch send-off", "code": "task_frozen"}, status=423)
++        return self.get_response(request)
++
++    def process_exception(self, request, exception):
++        # Race/worker-path rejection from guard.assert_writable surfaces as a clean 423, never a 500.
++        if isinstance(exception, TaskFrozenError):
++            return JsonResponse({"detail": str(exception), "code": "task_frozen"}, status=423)
++        return None
+diff --git a/cvat/apps/labeling_guard/migrations/0001_initial.py b/cvat/apps/labeling_guard/migrations/0001_initial.py
+new file mode 100644
+index 000000000..cc248c0bd
+--- /dev/null
++++ b/cvat/apps/labeling_guard/migrations/0001_initial.py
+@@ -0,0 +1,31 @@
++# Copyright (C) CVAT.ai Corporation
++#
++# SPDX-License-Identifier: MIT
++
++import django.db.models.deletion
++from django.db import migrations, models
++
++
++class Migration(migrations.Migration):
++    initial = True
++    dependencies = [("engine", "0110_rename_task_consensus_replicas_initial_replicas")]
++
++    operations = [
++        migrations.CreateModel(
++            name="TaskFreeze",
++            fields=[
++                (
++                    "task",
++                    models.OneToOneField(
++                        on_delete=django.db.models.deletion.CASCADE,
++                        primary_key=True,
++                        related_name="freeze",
++                        serialize=False,
++                        to="engine.task",
++                    ),
++                ),
++                ("send_off_id", models.CharField(max_length=128)),
++                ("created_date", models.DateTimeField(auto_now_add=True)),
++            ],
++        ),
++    ]
+diff --git a/cvat/apps/labeling_guard/migrations/__init__.py b/cvat/apps/labeling_guard/migrations/__init__.py
+new file mode 100644
+index 000000000..e69de29bb
+diff --git a/cvat/apps/labeling_guard/models.py b/cvat/apps/labeling_guard/models.py
+new file mode 100644
+index 000000000..154b7ce96
+--- /dev/null
++++ b/cvat/apps/labeling_guard/models.py
+@@ -0,0 +1,13 @@
++# Copyright (C) CVAT.ai Corporation
++#
++# SPDX-License-Identifier: MIT
++
++from django.db import models
++
++
++class TaskFreeze(models.Model):
++    """Presence of a row makes the task read-only for annotation/workflow mutations (batch send-off)."""
++
++    task = models.OneToOneField("engine.Task", on_delete=models.CASCADE, primary_key=True, related_name="freeze")
++    send_off_id = models.CharField(max_length=128)
++    created_date = models.DateTimeField(auto_now_add=True)
+diff --git a/cvat/apps/labeling_guard/urls.py b/cvat/apps/labeling_guard/urls.py
+new file mode 100644
+index 000000000..47760eae2
+--- /dev/null
++++ b/cvat/apps/labeling_guard/urls.py
+@@ -0,0 +1,12 @@
++# Copyright (C) CVAT.ai Corporation
++#
++# SPDX-License-Identifier: MIT
++
++from django.urls import path
++
++from .views import FreezeView, OrganizationMemberView
++
++urlpatterns = [
++    path("labeling-guard/tasks/<int:task_id>/freeze", FreezeView.as_view()),
++    path("labeling-guard/organizations/<slug:slug>/members", OrganizationMemberView.as_view()),
++]
+diff --git a/cvat/apps/labeling_guard/views.py b/cvat/apps/labeling_guard/views.py
+new file mode 100644
+index 000000000..d2ed62370
+--- /dev/null
++++ b/cvat/apps/labeling_guard/views.py
+@@ -0,0 +1,66 @@
++# Copyright (C) CVAT.ai Corporation
++#
++# SPDX-License-Identifier: MIT
++
++from rest_framework import permissions, status
++from rest_framework.response import Response
++from rest_framework.views import APIView
++
++from . import guard
++
++
++class FreezeView(APIView):
++    """PUT {send_off_id} freezes; DELETE unfreezes (abort before publication). Superusers only."""
++
++    permission_classes = [permissions.IsAdminUser]
++
++    def get(self, request, task_id: int):
++        return Response({"frozen": guard.is_frozen(task_id)})
++
++    def put(self, request, task_id: int):
++        obj = guard.freeze(task_id, str(request.data.get("send_off_id", "")))
++        return Response({"frozen": True, "send_off_id": obj.send_off_id}, status=status.HTTP_200_OK)
++
++    def delete(self, request, task_id: int):
++        guard.unfreeze(task_id)
++        return Response(status=status.HTTP_204_NO_CONTENT)
++
++
++class OrganizationMemberView(APIView):
++    """Superuser-only provisioning (CVAT has no add-member endpoint; invitations need an email backend).
++
++    PUT {username, email?, role}: ensure the user exists (unusable password; sign-in is via OIDC) and is an active
++    member with `role`. DELETE {username}: revoke membership. Idempotent.
++    """
++
++    permission_classes = [permissions.IsAdminUser]
++    ROLES = {"worker", "supervisor", "maintainer", "owner"}
++
++    def put(self, request, slug: str):
++        from django.contrib.auth import get_user_model
++        from django.utils import timezone
++
++        from cvat.apps.organizations.models import Membership, Organization
++
++        username, role = request.data.get("username"), request.data.get("role")
++        if not username or role not in self.ROLES:
++            return Response({"detail": "username and a valid role are required"}, status=status.HTTP_400_BAD_REQUEST)
++        try:
++            org = Organization.objects.get(slug=slug)
++        except Organization.DoesNotExist:
++            return Response(status=status.HTTP_404_NOT_FOUND)
++        User = get_user_model()
++        user, created = User.objects.get_or_create(username=username, defaults={"email": request.data.get("email", "")})
++        if created:
++            user.set_unusable_password()
++            user.save(update_fields=["password"])
++        member, _ = Membership.objects.update_or_create(
++            user=user, organization=org, defaults={"is_active": True, "role": role, "joined_date": timezone.now()}
++        )
++        return Response({"user_id": user.id, "membership_id": member.id, "role": member.role, "created_user": created})
++
++    def delete(self, request, slug: str):
++        from cvat.apps.organizations.models import Membership
++
++        deleted, _ = Membership.objects.filter(organization__slug=slug, user__username=request.data.get("username")).delete()
++        return Response(status=status.HTTP_204_NO_CONTENT if deleted else status.HTTP_404_NOT_FOUND)
+diff --git a/cvat/settings/base.py b/cvat/settings/base.py
+index 98f796439..32c43f513 100644
+--- a/cvat/settings/base.py
++++ b/cvat/settings/base.py
+@@ -148,6 +148,7 @@ INSTALLED_APPS = [
+     "cvat.apps.consensus",
+     "cvat.apps.access_tokens",
+     "cvat.apps.growth",
++    "cvat.apps.labeling_guard",
+ ]
+ 
+ AUTH_USER_MODEL = "iam.User"
+@@ -245,6 +246,7 @@ MIDDLEWARE = [
+     "django.middleware.security.SecurityMiddleware",
+     "django.contrib.sessions.middleware.SessionMiddleware",
+     "cvat.apps.iam.middleware.SessionRefreshMiddleware",
++    "cvat.apps.labeling_guard.middleware.FrozenTaskMiddleware",
+     "corsheaders.middleware.CorsMiddleware",
+     "django.middleware.common.CommonMiddleware",
+     "django.middleware.csrf.CsrfViewMiddleware",
+@@ -877,3 +879,29 @@ USER_LAST_ACTIVITY_UPDATE_MIN_INTERVAL = timedelta(days=1)
+ 
+ # Health check settings
+ HEALTH_CHECK = {"DISK_USAGE_MAX": int(os.getenv("CVAT_HEALTH_DISK_USAGE_MAX", 90))}
++
++
++# --- labeling integration: optional OIDC login via django-allauth (Community build ships the library only) ---
++LABELING_OIDC_ISSUER = os.getenv("LABELING_OIDC_ISSUER")
++if LABELING_OIDC_ISSUER:
++    INSTALLED_APPS += ["allauth.socialaccount.providers.openid_connect"]
++    SOCIALACCOUNT_PROVIDERS = {
++        "openid_connect": {
++            "APPS": [
++                {
++                    "provider_id": os.getenv("LABELING_OIDC_PROVIDER_ID", "portal"),
++                    "name": "Portal",
++                    "client_id": os.environ["LABELING_OIDC_CLIENT_ID"],
++                    "secret": os.environ["LABELING_OIDC_CLIENT_SECRET"],
++                    "settings": {"server_url": LABELING_OIDC_ISSUER},
++                }
++            ]
++        }
++    }
++    SOCIALACCOUNT_LOGIN_ON_GET = True  # portal launches editor with a top-level GET redirect
++    SOCIALACCOUNT_AUTO_SIGNUP = True
++    LOGIN_REDIRECT_URL = "/"
++    ACCOUNT_ADAPTER = "cvat.apps.labeling_guard.adapters.StrictReturnAccountAdapter"
++    LABELING_ALLOWED_RETURN_HOSTS = tuple(
++        h for h in os.getenv("LABELING_ALLOWED_RETURN_HOSTS", "").split(",") if h
++    )
+diff --git a/cvat/urls.py b/cvat/urls.py
+index b04c53fd8..4a203ea15 100644
+--- a/cvat/urls.py
++++ b/cvat/urls.py
+@@ -19,6 +19,7 @@ Including another URLconf
+ """
+ 
+ from django.apps import apps
++from django.conf import settings
+ from django.contrib import admin
+ from django.urls import include, path
+ 
+@@ -27,6 +28,7 @@ urlpatterns = [
+     path("", include("cvat.apps.engine.urls")),
+     path("", include("cvat.apps.redis_handler.urls")),
+     path("django-rq/", include("django_rq.urls")),
++    path("api/", include("cvat.apps.labeling_guard.urls")),
+ ]
+ 
+ if apps.is_installed("cvat.apps.log_viewer"):
+@@ -58,3 +60,6 @@ if apps.is_installed("cvat.apps.access_tokens"):
+ 
+ if apps.is_installed("cvat.apps.growth"):
+     urlpatterns.append(path("api/", include("cvat.apps.growth.urls")))
++
++if getattr(settings, "LABELING_OIDC_ISSUER", None):
++    urlpatterns.append(path("api/auth/social/", include("allauth.urls")))

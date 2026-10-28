@@ -1,0 +1,11 @@
+# Thin overlay on the pinned upstream image: adds the labeling_guard app and its 4 touched files.
+# Build context: integration/.cvat-src (patched v2.80.0 worktree). See cvat/patches/0001-write-guard.patch.
+ARG CVAT_BASE=cvat/server:v2.80.0
+FROM ${CVAT_BASE}
+USER root
+COPY cvat/apps/labeling_guard /opt/cvat/cvat/apps/labeling_guard
+COPY cvat/settings/base.py /opt/cvat/cvat/settings/base.py
+COPY cvat/urls.py /opt/cvat/cvat/urls.py
+COPY cvat/apps/dataset_manager/task.py /opt/cvat/cvat/apps/dataset_manager/task.py
+RUN python -m compileall -q /opt/cvat/cvat/apps/labeling_guard /opt/cvat/cvat/settings /opt/cvat/cvat/apps/dataset_manager
+USER 1000:1000

@@ -1,0 +1,16 @@
+# DEV/TEST ONLY: mock OIDC IdP + OIDC env for CVAT. Not part of the release package.
+# Issuer host must resolve identically from CVAT containers and the host browser/test runner.
+services:
+  mock_idp:
+    image: ghcr.io/navikt/mock-oauth2-server:2.1.10
+    container_name: mock_idp
+    ports: ["8081:8081"]
+    environment:
+      SERVER_PORT: "8081"
+      JSON_CONFIG: '{"interactiveLogin": true, "httpServer": "NettyWrapper"}'
+    networks: [cvat]
+  cvat_server:
+    environment: &oidc
+      LABELING_OIDC_ISSUER: http://host.docker.internal:8081/default
+      LABELING_OIDC_CLIENT_ID: cvat-local
+      LABELING_OIDC_CLIENT_SECRET: local-only-secret

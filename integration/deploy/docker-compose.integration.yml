@@ -1,0 +1,17 @@
+# Integration-owned services (separate from CVAT's own Postgres). Standalone only; the marketplace DB replaces this at incorporation.
+services:
+  labeling_db:
+    image: postgres:16-alpine
+    container_name: labeling_db
+    environment:
+      POSTGRES_USER: labeling
+      POSTGRES_PASSWORD: ${LABELING_DB_PASSWORD:-labeling-local-only}
+      POSTGRES_DB: labeling
+    ports: ["127.0.0.1:5433:5432"]
+    volumes: [labeling_db_data:/var/lib/postgresql/data]
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U labeling -d labeling"]
+      interval: 5s
+      retries: 20
+volumes:
+  labeling_db_data: {}

@@ -1,0 +1,14 @@
+{
+  "schema_version": 1,
+  "pts_s": [
+    0.0,
+    0.033333,
+    0.066667,
+    0.1,
+    0.133333
+  ],
+  "clip_start_offset_s": 12.5,
+  "start_frame": 0,
+  "step": 1,
+  "variable_frame_rate": false
+}

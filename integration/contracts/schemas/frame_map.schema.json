@@ -1,0 +1,43 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "frame_map.schema.json",
+  "title": "FrameMap",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "pts_s",
+    "clip_start_offset_s",
+    "start_frame",
+    "step",
+    "variable_frame_rate"
+  ],
+  "properties": {
+    "schema_version": {
+      "const": 1
+    },
+    "pts_s": {
+      "type": "array",
+      "minItems": 2,
+      "items": {
+        "type": "number",
+        "minimum": 0
+      }
+    },
+    "clip_start_offset_s": {
+      "type": "number",
+      "minimum": 0
+    },
+    "start_frame": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "step": {
+      "type": "integer",
+      "minimum": 1
+    },
+    "variable_frame_rate": {
+      "type": "boolean"
+    }
+  }
+}

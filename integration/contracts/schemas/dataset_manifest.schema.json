@@ -1,0 +1,199 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "dataset_manifest.schema.json",
+  "title": "DatasetManifest",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "manifest_version",
+    "tenant_id",
+    "dataset_version_id",
+    "batch_id",
+    "label_schema",
+    "media",
+    "cvat",
+    "review_evidence",
+    "artifacts",
+    "created_at",
+    "predecessor_version_id"
+  ],
+  "properties": {
+    "manifest_version": {
+      "const": 1
+    },
+    "tenant_id": {
+      "type": "string"
+    },
+    "dataset_version_id": {
+      "type": "string",
+      "format": "uuid"
+    },
+    "batch_id": {
+      "type": "string",
+      "format": "uuid"
+    },
+    "predecessor_version_id": {
+      "oneOf": [
+        {
+          "type": "string",
+          "format": "uuid"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "label_schema": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "version",
+        "sha256"
+      ],
+      "properties": {
+        "version": {
+          "type": "string"
+        },
+        "sha256": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{64}$"
+        }
+      }
+    },
+    "media": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "$ref": "media_reference.schema.json"
+      }
+    },
+    "cvat": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "server_version",
+        "image_digest",
+        "guard_patch"
+      ],
+      "properties": {
+        "server_version": {
+          "type": "string"
+        },
+        "image_digest": {
+          "type": "string"
+        },
+        "guard_patch": {
+          "type": "string"
+        }
+      }
+    },
+    "model_provenance": {
+      "type": [
+        "array",
+        "null"
+      ],
+      "items": {
+        "type": "object",
+        "required": [
+          "run_id",
+          "model_artifact",
+          "settings_sha256"
+        ],
+        "properties": {
+          "run_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "model_artifact": {
+            "type": "string"
+          },
+          "settings_sha256": {
+            "type": "string",
+            "pattern": "^[0-9a-f]{64}$"
+          }
+        }
+      }
+    },
+    "review_evidence": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "job_id",
+          "annotation_revision",
+          "snapshot_sha256",
+          "reviewer_id",
+          "decision",
+          "decided_at"
+        ],
+        "properties": {
+          "job_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "annotation_revision": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "snapshot_sha256": {
+            "type": "string",
+            "pattern": "^[0-9a-f]{64}$"
+          },
+          "reviewer_id": {
+            "type": "string"
+          },
+          "decision": {
+            "const": "approved"
+          },
+          "decided_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "attestation": {
+            "type": "string"
+          }
+        }
+      }
+    },
+    "artifacts": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "uri",
+          "format",
+          "format_version",
+          "sha256",
+          "bytes"
+        ],
+        "properties": {
+          "uri": {
+            "type": "string"
+          },
+          "format": {
+            "type": "string"
+          },
+          "format_version": {
+            "type": "string"
+          },
+          "sha256": {
+            "type": "string",
+            "pattern": "^[0-9a-f]{64}$"
+          },
+          "bytes": {
+            "type": "integer",
+            "minimum": 0
+          }
+        }
+      }
+    },
+    "created_at": {
+      "type": "string",
+      "format": "date-time"
+    }
+  }
+}

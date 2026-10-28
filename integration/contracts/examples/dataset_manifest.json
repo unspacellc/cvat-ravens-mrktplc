@@ -1,0 +1,76 @@
+{
+  "manifest_version": 1,
+  "tenant_id": "tenant-1",
+  "dataset_version_id": "11111111-1111-4111-8111-111111111111",
+  "batch_id": "22222222-2222-4222-8222-222222222222",
+  "predecessor_version_id": null,
+  "label_schema": {
+    "version": "1.0.0",
+    "sha256": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"
+  },
+  "media": [
+    {
+      "source_asset_id": "asset-1",
+      "storage": {
+        "bucket": "yard-media",
+        "key": "t1/a.mp4",
+        "version_id": null
+      },
+      "sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "clip": {
+        "start_offset_s": 12.5,
+        "duration_s": 4.0
+      },
+      "dimensions": {
+        "width": 320,
+        "height": 240
+      },
+      "frame_map": {
+        "schema_version": 1,
+        "pts_s": [
+          0.0,
+          0.033333,
+          0.066667,
+          0.1,
+          0.133333
+        ],
+        "clip_start_offset_s": 12.5,
+        "start_frame": 0,
+        "step": 1,
+        "variable_frame_rate": false
+      },
+      "telemetry": {
+        "status": "aligned",
+        "reason": null,
+        "srt_sha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+      }
+    }
+  ],
+  "cvat": {
+    "server_version": "2.80.0",
+    "image_digest": "sha256:955ae3b34089fbd57d22bf9a692cef82c99647f9970dd68a716448eec252f425",
+    "guard_patch": "0001-write-guard"
+  },
+  "model_provenance": null,
+  "review_evidence": [
+    {
+      "job_id": "33333333-3333-4333-8333-333333333333",
+      "annotation_revision": 2,
+      "snapshot_sha256": "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+      "reviewer_id": "u-rev",
+      "decision": "approved",
+      "decided_at": "2026-10-28T10:00:00Z",
+      "attestation": "all frames reviewed"
+    }
+  ],
+  "artifacts": [
+    {
+      "uri": "s3://labeling-published/labeling/tenant-1/22222222-2222-4222-8222-222222222222/11111111-1111-4111-8111-111111111111/annotations.zip",
+      "format": "cvat_video_1.1",
+      "format_version": "1.1",
+      "sha256": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
+      "bytes": 1024
+    }
+  ],
+  "created_at": "2026-10-28T10:05:00Z"
+}
