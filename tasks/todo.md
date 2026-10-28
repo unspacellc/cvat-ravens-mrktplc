@@ -51,3 +51,38 @@ Key findings that shape the work:
 - Phase 1: done; checkpoint `integration/docs/phases/phase-1.md`. `uv run pytest tests` → 63 passed; ruff clean.
 - Plan deviations: Postgres-as-queue instead of SQS (deferred); membership via a CVAT patch endpoint (no REST add-member in v2.80.0); worker uses local fixture media.
 - Verify commands: `deploy/stack.sh up && deploy/stack.sh health`, `cd integration && make check && make test-capability`.
+
+
+---
+
+# Plan: CVAT Integration — Phase 2 (Standalone portal and access)
+
+## Context
+Phases 0–1 are committed on `feat/labeling-integration-p0-p1` (507ca5210). Phase 2 (spec lines 330–336) turns the data bridge into a usable product slice:
+"My jobs", review queue shell, board, batch detail, manual assignment, per-user editor launch, with loading/empty/failure/stale states, and **real per-user session integration with server-enforced assignment/tenant checks**. Exit gate: labeler, reviewer and admin journeys work against real CVAT; direct URL/API access, tenant switching, expired sessions and reassignment are tested; **no shared admin session, no stub authentication**.
+
+Owner decisions already in hand: Cognito only (no SSO), one Cognito `sub` -> one CVAT user, second Cognito prompt accepted (ADR 0005); design point 5 labelers + 2–4 job creators; whole system < $4,000/month.
+
+Existing pieces to reuse (all under `integration/`): `api/labeling/{app,service,projection,provisioning,cvat_client,adapters,fixtures,config,models}.py`, `Principal`/`IdentityContext` in `adapters.py`, `service.assign_job` / `create_batch`, CVAT patch OIDC route `/api/auth/social/<provider>/login/` and member endpoint, mock IdP compose (`deploy/docker-compose.idp.yml`), test fixtures in `tests/integration/conftest.py` and `tests/capability/conftest.py`.
+Marketplace stack to match (`../frontend/unspaced/packages/web`): React Router 7, React 19, Tailwind 4, Radix, TanStack Query/Table, jest/playwright; BFF pattern with server-side token storage (`auth.session.server.ts`, `api-client.server.ts`). Marketplace API signs users in via Cognito `USER_PASSWORD_AUTH`.
+
+## Design
+1. **Auth on the portal API (no stubs).** New `api/labeling/auth.py`: bearer JWT verified against the issuer's JWKS (RS256, `iss`, `token_use=access`, `client_id`/`aud`, `exp`), implemented as a concrete `IdentityContext`. Works for Cognito in prod and the mock IdP in dev/tests (both issue genuinely signed JWTs), so tests exercise real signature/expiry checks. Tenant and roles come from a server-side `labeling_member(tenant_id, user_id, role, status)` table (fixture for the standalone host; the marketplace binding replaces it at Phase 7). Identity key is `sub`; never trust tenant/role claims or request headers. Multi-tenant users select a tenant with `X-Labeling-Tenant`, accepted only if a membership row exists.
+2. **Role -> CVAT role:** labeler=worker, reviewer=supervisor, admin=maintainer (assumption; recorded in an ADR). Membership/assignment changes call existing `ensure_member`/`revoke_member`/`set_job_assignee`; removal clears open assignments.
+3. **Routes** (`api/labeling/routes/`, marketplace `/api/v1/labeling` prefix and `{error,statusCode,code,details,requestId}` envelope):
+   `GET /jobs` (inbox/board; filters state/assignee/batch, cursor pagination, `sync_age_s`, operation errors), `GET /batches`, `GET /batches/{id}`, `POST /batches` (202 + operation id; wraps `create_batch`), `POST /jobs/{id}/assignment` (admin; expected `revision`, audited), `POST /jobs/{id}/editor-launch`, `GET /operations/{id}`, `GET/PUT /members` (admin). Labelers only ever see jobs assigned to them; reviewers/admins are tenant-scoped; every query filters `tenant_id` from the resolved principal.
+4. **Editor launch:** checks tenant, assignment (or reviewer/admin role), active CVAT identity and synced assignee, then returns an allowlisted URL to CVAT's OIDC login route with `next=/tasks/{t}/jobs/{j}` (return hosts already restricted by `StrictReturnAccountAdapter`). Per-user CVAT session comes from the user's own Cognito/IdP login; no token in URLs, no shared admin session. Reassignment and revocation take effect in CVAT permissions immediately (assignee removed / membership revoked); portal launch refuses stale assignment.
+5. **Web (`integration/web/`):** React Router 7 + Tailwind 4 + Radix + TanStack Query, same major versions as the marketplace, so modules map to `packages/web/app`. Feature modules: `my-jobs`, `board`, `batch-detail`, `assign-dialog`, `editor-launch`, plus shared state components (loading/empty/error/stale with sync age). A small standalone host does real OIDC code-flow login against the mock IdP and keeps tokens server-side (BFF) like the marketplace; it is dev-only. Reviewer view is a filtered job list + launch only (submit/reject/approve is Phase 3).
+6. **Out of scope:** review commands/snapshots (Phase 3), pre-labeling (4), creation wizard UI (5), Cognito pool test (needs a real AWS dev pool; ADR 0005 marks it Phase 2 gate — run if credentials/pool are provided, otherwise record as unmet and test against mock IdP only).
+
+## Steps -> verify
+1. Process: copy this plan to `tasks/todo.md`; keep feature branch (new branch `feat/labeling-integration-p2` off the P0/P1 commit). -> file exists.
+2. `labeling_member` migration + `auth.py` (JWKS verifier, tenant/role resolution) -> unit tests: valid, expired, wrong issuer/audience, bad signature, unknown user, cross-tenant header.
+3. Routes + service additions (job/batch queries, assignment endpoint with expected revision, members, operations) -> API tests with two tenants: labeler sees only own jobs, direct job-id access to other tenant/assignee is 404/403, optimistic-conflict 409.
+4. Editor launch + CVAT identity lifecycle -> real-CVAT tests: assigned labeler logs in via IdP and reads own job; unassigned labeler denied job/annotations/frames; reassignment moves access; removed member loses access; expired portal token rejected; launch URL host allowlist.
+5. Web feature modules + standalone host + states -> vitest component tests for all four states per view, typecheck, lint, build; Playwright smoke through mock IdP -> My jobs -> launch.
+6. Journeys (scripted e2e on the real stack): labeler, reviewer, admin; tenant switching; direct URL access -> `tests/e2e/`.
+7. Docs: ADR 0006 (portal auth, role mapping, launch), `docs/phases/phase-2.md` with evidence, honest gate verdict, known gaps; update capacity/cost notes only if measured. Commit on the Phase 2 branch only after the user asks to keep history tidy? (User said commit at phase boundaries; commit the Phase 2 work at the end.)
+
+## Verification
+`uv run pytest tests` (existing 63 plus new), `ruff`, web `typecheck`/`lint`/`vitest`/`build`/Playwright, then `deploy/stack.sh up` with `WITH_IDP=1` and the e2e journeys. The phase doc records outputs and any unmet gate (e.g. Cognito pool test) rather than claiming it.

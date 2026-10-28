@@ -34,6 +34,14 @@ def idp():
         pytest.skip("mock IdP not running (WITH_IDP=1 deploy/stack.sh up)")
 
 
+def link(admin_token: str, slug: str, name: str, role: str = "worker") -> dict:
+    """What the portal does when it grants access: provision the CVAT user and link it to the IdP `sub`."""
+    r = httpx.put(f"{BASE_URL}/api/labeling-guard/organizations/{slug}/members", headers={"Authorization": f"Token {admin_token}"},
+                  json={"username": f"u-{name}", "email": f"{name}@example.com", "role": role, "uid": name}, timeout=30)
+    assert r.status_code == 200, r.text
+    return r.json()
+
+
 def _login(username: str, email: str, *, next_path: str = "/") -> httpx.Client:
     c = httpx.Client(base_url=BASE_URL, timeout=30, follow_redirects=False)
     r = c.get("/api/auth/social/oidc/portal/login/", params={"process": "login", "next": next_path})
@@ -52,19 +60,46 @@ def _login(username: str, email: str, *, next_path: str = "/") -> httpx.Client:
     return c
 
 
-def test_oidc_login_creates_per_user_session(idp):
+def test_oidc_login_resolves_to_the_provisioned_user(idp, org, admin_token):
+    _, slug = org
     name = f"oidc{uuid.uuid4().hex[:8]}"
+    provisioned = link(admin_token, slug, name)
     c = _login(name, f"{name}@example.com")
     me = c.get("/api/users/self")
     assert me.status_code == 200, me.text[:200]
-    assert me.json()["username"] == name and me.json()["email"] == f"{name}@example.com"
-    # second login maps to the same CVAT user (no duplicate)
+    assert me.json()["id"] == provisioned["user_id"] and me.json()["username"] == f"u-{name}"
     again = _login(name, f"{name}@example.com").get("/api/users/self").json()
     assert again["id"] == me.json()["id"]
 
 
-def test_distinct_idp_users_get_distinct_identities(idp):
+def test_unprovisioned_identity_cannot_sign_in_or_self_register(idp):
+    name = f"oidc{uuid.uuid4().hex[:8]}"
+    c = _login(name, f"{name}@example.com")
+    assert c.get("/api/users/self").status_code == 401
+
+
+def test_matching_email_does_not_link_to_a_provisioned_user(idp, org, admin_token):
+    _, slug = org
+    victim = f"oidc{uuid.uuid4().hex[:8]}"
+    link(admin_token, slug, victim)
+    attacker = f"oidc{uuid.uuid4().hex[:8]}"
+    c = _login(attacker, f"{victim}@example.com")  # claims the victim's email, different sub
+    assert c.get("/api/users/self").status_code == 401
+
+
+def test_identity_cannot_be_linked_to_two_users(idp, org, admin_token):
+    _, slug = org
+    name = f"oidc{uuid.uuid4().hex[:8]}"
+    link(admin_token, slug, name)
+    r = httpx.put(f"{BASE_URL}/api/labeling-guard/organizations/{slug}/members", headers={"Authorization": f"Token {admin_token}"},
+                  json={"username": "someone-else", "role": "worker", "uid": name}, timeout=30)
+    assert r.status_code == 409
+
+
+def test_distinct_idp_users_get_distinct_identities(idp, org, admin_token):
+    _, slug = org
     a, b = f"oidc{uuid.uuid4().hex[:8]}", f"oidc{uuid.uuid4().hex[:8]}"
+    link(admin_token, slug, a), link(admin_token, slug, b)
     ida = _login(a, f"{a}@example.com").get("/api/users/self").json()["id"]
     idb = _login(b, f"{b}@example.com").get("/api/users/self").json()["id"]
     assert ida != idb
@@ -74,8 +109,10 @@ def test_unauthenticated_client_has_no_session(idp):
     assert httpx.get(f"{BASE_URL}/api/users/self").status_code == 401
 
 
-def test_return_url_is_restricted_to_own_host(idp):
+def test_return_url_is_restricted_to_own_host(idp, org, admin_token):
+    _, slug = org
     name = f"oidc{uuid.uuid4().hex[:8]}"
+    link(admin_token, slug, name)
     c = httpx.Client(base_url=BASE_URL, timeout=30)
     r = c.get("/api/auth/social/oidc/portal/login/", params={"process": "login", "next": "https://evil.example/steal"})
     authorize = _browser_url(r.headers["location"]) if r.status_code == 302 else None

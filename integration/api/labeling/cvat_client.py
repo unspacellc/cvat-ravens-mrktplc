@@ -44,12 +44,14 @@ class CvatClient:
                 return o
         return self._req("POST", "/api/organizations", json={"slug": slug, "name": slug}).json()
 
-    def ensure_member(self, slug: str, username: str, role: str, email: str = "") -> dict:
-        return self._req("PUT", f"/api/labeling-guard/organizations/{slug}/members",
-                         json={"username": username, "role": role, "email": email}).json()
+    def ensure_member(self, slug: str, username: str, role: str, email: str = "", uid: str | None = None) -> dict:
+        """`uid` (IdP `sub`) links the CVAT user to that identity so the person's own OIDC login resolves to it."""
+        body = {"username": username, "role": role, "email": email, **({"uid": uid} if uid else {})}
+        return self._req("PUT", f"/api/labeling-guard/organizations/{slug}/members", json=body).json()
 
-    def revoke_member(self, slug: str, username: str) -> None:
-        self._req("DELETE", f"/api/labeling-guard/organizations/{slug}/members", json={"username": username}, ok=(204, 404))
+    def revoke_member(self, slug: str, username: str, *, deactivate: bool = False) -> None:
+        self._req("DELETE", f"/api/labeling-guard/organizations/{slug}/members",
+                  json={"username": username, "deactivate": deactivate}, ok=(204, 404))
 
     # --- webhooks ----------------------------------------------------------------
     def ensure_webhook(self, org: str, target_url: str, secret: str, events: list[str]) -> dict:

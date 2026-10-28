@@ -9,7 +9,7 @@ class FixtureIdentity:
     def __init__(self, users: dict[str, Principal]):
         self._users = users
 
-    def resolve(self, credentials: str) -> Principal:
+    def resolve(self, credentials: str, tenant_hint: str | None = None) -> Principal:
         try:
             return self._users[credentials]
         except KeyError:

@@ -18,7 +18,7 @@ from sqlalchemy import (
     func,
     text,
 )
-from sqlalchemy.dialects.postgresql import JSONB, UUID
+from sqlalchemy.dialects.postgresql import ARRAY, JSONB, UUID
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
 
 
@@ -201,3 +201,17 @@ class Outbox(Base):
     payload: Mapped[dict] = mapped_column(JSONB, nullable=False)
     occurred_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     published_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+
+class LabelingMember(Base, Stamped):
+    """Standalone stand-in for marketplace tenant membership: who may use labeling in a tenant, and as what.
+    Identity key is the IdP `sub` (Cognito). Replaced by the host IdentityContext binding at incorporation."""
+
+    __tablename__ = "labeling_member"
+    tenant_id: Mapped[str] = mapped_column(String(128), primary_key=True)
+    user_id: Mapped[str] = mapped_column(String(128), primary_key=True)
+    roles: Mapped[list[str]] = mapped_column(ARRAY(String(16)), nullable=False)  # labeler|reviewer|creator|admin
+    status: Mapped[str] = mapped_column(String(16), nullable=False, default="active")  # active|removed
+    username: Mapped[str | None] = mapped_column(String(150))
+    email: Mapped[str | None] = mapped_column(String(254))
+    __table_args__ = (Index("ix_member_user", "user_id"),)

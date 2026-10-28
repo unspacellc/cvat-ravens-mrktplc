@@ -79,10 +79,10 @@ new file mode 100644
 index 000000000..e69de29bb
 diff --git a/cvat/apps/labeling_guard/adapters.py b/cvat/apps/labeling_guard/adapters.py
 new file mode 100644
-index 000000000..e55da1a9c
+index 000000000..d26785ba9
 --- /dev/null
 +++ b/cvat/apps/labeling_guard/adapters.py
-@@ -0,0 +1,22 @@
+@@ -0,0 +1,31 @@
 +# Copyright (C) CVAT.ai Corporation
 +#
 +# SPDX-License-Identifier: MIT
@@ -91,6 +91,7 @@ index 000000000..e55da1a9c
 +from django.utils.http import url_has_allowed_host_and_scheme
 +
 +from allauth.core import context
++from allauth.socialaccount.adapter import DefaultSocialAccountAdapter
 +
 +from cvat.apps.iam.adapters import DefaultAccountAdapterEx
 +
@@ -105,6 +106,14 @@ index 000000000..e55da1a9c
 +    def is_safe_url(self, url: str) -> bool:
 +        allowed = {context.request.get_host(), *getattr(settings, "LABELING_ALLOWED_RETURN_HOSTS", ())}
 +        return url_has_allowed_host_and_scheme(url, allowed_hosts=allowed)
++
++
++class ProvisionedOnlySocialAdapter(DefaultSocialAccountAdapter):
++    """OIDC login may only sign in identities the portal already linked (SocialAccount provider+uid, created by the
++    member endpoint). Unknown identities cannot self-register and nothing is linked by email."""
++
++    def is_open_for_signup(self, request, sociallogin):
++        return bool(getattr(settings, "LABELING_OIDC_AUTO_SIGNUP", False))
 diff --git a/cvat/apps/labeling_guard/apps.py b/cvat/apps/labeling_guard/apps.py
 new file mode 100644
 index 000000000..64985cb4c
@@ -337,10 +346,10 @@ index 000000000..47760eae2
 +]
 diff --git a/cvat/apps/labeling_guard/views.py b/cvat/apps/labeling_guard/views.py
 new file mode 100644
-index 000000000..d2ed62370
+index 000000000..630ea1e7b
 --- /dev/null
 +++ b/cvat/apps/labeling_guard/views.py
-@@ -0,0 +1,66 @@
+@@ -0,0 +1,92 @@
 +# Copyright (C) CVAT.ai Corporation
 +#
 +# SPDX-License-Identifier: MIT
@@ -372,8 +381,10 @@ index 000000000..d2ed62370
 +class OrganizationMemberView(APIView):
 +    """Superuser-only provisioning (CVAT has no add-member endpoint; invitations need an email backend).
 +
-+    PUT {username, email?, role}: ensure the user exists (unusable password; sign-in is via OIDC) and is an active
-+    member with `role`. DELETE {username}: revoke membership. Idempotent.
++    PUT {username, email?, role, uid?}: ensure the user exists (unusable password; sign-in is via OIDC) and is an
++    active member with `role`. With `uid` (the IdP `sub`) the user is linked to that identity for the configured
++    provider, so the person's own OIDC login resolves to exactly this user (no email matching).
++    DELETE {username, deactivate?}: revoke membership (and optionally the account). Idempotent.
 +    """
 +
 +    permission_classes = [permissions.IsAdminUser]
@@ -397,6 +408,18 @@ index 000000000..d2ed62370
 +        if created:
 +            user.set_unusable_password()
 +            user.save(update_fields=["password"])
++        uid = request.data.get("uid")
++        if uid:
++            from django.conf import settings
++            from allauth.socialaccount.models import SocialAccount
++
++            provider = settings.LABELING_OIDC_PROVIDER_ID
++            link, _ = SocialAccount.objects.get_or_create(provider=provider, uid=str(uid), defaults={"user": user})
++            if link.user_id != user.id:
++                return Response({"detail": "identity already linked to another user"}, status=status.HTTP_409_CONFLICT)
++            if not user.is_active:
++                user.is_active = True
++                user.save(update_fields=["is_active"])
 +        member, _ = Membership.objects.update_or_create(
 +            user=user, organization=org, defaults={"is_active": True, "role": role, "joined_date": timezone.now()}
 +        )
@@ -405,10 +428,22 @@ index 000000000..d2ed62370
 +    def delete(self, request, slug: str):
 +        from cvat.apps.organizations.models import Membership
 +
-+        deleted, _ = Membership.objects.filter(organization__slug=slug, user__username=request.data.get("username")).delete()
++        username = request.data.get("username")
++        deleted, _ = Membership.objects.filter(organization__slug=slug, user__username=username).delete()
++        if request.data.get("deactivate"):
++            from django.contrib.auth import get_user_model
++            from django.contrib.sessions.models import Session
++
++            user = get_user_model().objects.filter(username=username, is_superuser=False).first()
++            if user:
++                user.is_active = False
++                user.save(update_fields=["is_active"])
++                for sess in Session.objects.all():  # end live sessions of the deactivated user
++                    if str(sess.get_decoded().get("_auth_user_id")) == str(user.id):
++                        sess.delete()
 +        return Response(status=status.HTTP_204_NO_CONTENT if deleted else status.HTTP_404_NOT_FOUND)
 diff --git a/cvat/settings/base.py b/cvat/settings/base.py
-index 98f796439..32c43f513 100644
+index 98f796439..e42823225 100644
 --- a/cvat/settings/base.py
 +++ b/cvat/settings/base.py
 @@ -148,6 +148,7 @@ INSTALLED_APPS = [
@@ -427,7 +462,7 @@ index 98f796439..32c43f513 100644
      "corsheaders.middleware.CorsMiddleware",
      "django.middleware.common.CommonMiddleware",
      "django.middleware.csrf.CsrfViewMiddleware",
-@@ -877,3 +879,29 @@ USER_LAST_ACTIVITY_UPDATE_MIN_INTERVAL = timedelta(days=1)
+@@ -877,3 +879,32 @@ USER_LAST_ACTIVITY_UPDATE_MIN_INTERVAL = timedelta(days=1)
  
  # Health check settings
  HEALTH_CHECK = {"DISK_USAGE_MAX": int(os.getenv("CVAT_HEALTH_DISK_USAGE_MAX", 90))}
@@ -454,6 +489,9 @@ index 98f796439..32c43f513 100644
 +    SOCIALACCOUNT_AUTO_SIGNUP = True
 +    LOGIN_REDIRECT_URL = "/"
 +    ACCOUNT_ADAPTER = "cvat.apps.labeling_guard.adapters.StrictReturnAccountAdapter"
++    SOCIALACCOUNT_ADAPTER = "cvat.apps.labeling_guard.adapters.ProvisionedOnlySocialAdapter"
++    LABELING_OIDC_AUTO_SIGNUP = os.getenv("LABELING_OIDC_AUTO_SIGNUP") == "1"  # dev/test only
++    LABELING_OIDC_PROVIDER_ID = os.getenv("LABELING_OIDC_PROVIDER_ID", "portal")
 +    LABELING_ALLOWED_RETURN_HOSTS = tuple(
 +        h for h in os.getenv("LABELING_ALLOWED_RETURN_HOSTS", "").split(",") if h
 +    )

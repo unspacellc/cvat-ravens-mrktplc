@@ -15,6 +15,9 @@ class Settings:
     webhook_public_url: str = field(default_factory=lambda: os.environ.get(
         "WEBHOOK_PUBLIC_URL", "http://host.docker.internal:8000/api/v1/labeling/webhooks/cvat"))
     webhook_master_secret: str = field(default_factory=lambda: os.environ.get("LABELING_WEBHOOK_MASTER_SECRET", "dev-only-master-secret"))
+    # Browser-facing CVAT origin and the OIDC provider id CVAT exposes (editor launch targets this only).
+    cvat_public_url: str = field(default_factory=lambda: os.environ.get("CVAT_PUBLIC_URL", os.environ.get("CVAT_URL", "http://localhost:8080")))
+    oidc_provider_id: str = field(default_factory=lambda: os.environ.get("LABELING_OIDC_PROVIDER_ID", "portal"))
     reconcile_interval_s: int = field(default_factory=lambda: int(os.environ.get("LABELING_RECONCILE_INTERVAL_S", "300")))
     segment_size: int = field(default_factory=lambda: int(os.environ.get("LABELING_SEGMENT_SIZE", "300")))
 
@@ -26,3 +29,14 @@ class Settings:
 def org_slug_for(tenant_id: str) -> str:
     """CVAT org slugs are <=16 chars; derive a stable, collision-resistant slug from the tenant id."""
     return "lb-" + hashlib.sha256(tenant_id.encode()).hexdigest()[:12]
+
+
+def cvat_username_for(user_id: str) -> str:
+    """Stable CVAT username derived from the IdP `sub`, so CVAT identity never depends on IdP display claims."""
+    return "lb-u-" + hashlib.sha256(user_id.encode()).hexdigest()[:20]
+
+
+def cvat_role_for(roles) -> str:
+    """Least privilege. In CVAT v2.80.0 only maintainers see jobs they are not assigned to (supervisor == worker for
+    job visibility), so reviewers get worker access to the jobs assigned to them for review; only tenant admins are maintainers."""
+    return "maintainer" if "admin" in roles else "worker"

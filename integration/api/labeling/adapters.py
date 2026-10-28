@@ -17,8 +17,9 @@ class Principal:
 
 @runtime_checkable
 class IdentityContext(Protocol):
-    def resolve(self, credentials: str) -> Principal:
-        """Server-side tenant membership resolution. Raises PermissionError when unauthenticated/unknown."""
+    def resolve(self, credentials: str, tenant_hint: str | None = None) -> Principal:
+        """Server-side tenant membership resolution. `tenant_hint` only selects among memberships the user already
+        holds. Raises PermissionError when unauthenticated/unknown/not a member."""
 
 
 @runtime_checkable
