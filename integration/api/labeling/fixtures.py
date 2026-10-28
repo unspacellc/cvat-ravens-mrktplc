@@ -16,6 +16,10 @@ class FixtureIdentity:
             raise PermissionError("unknown credentials") from None
 
 
+    def memberships(self, credentials: str) -> list[Principal]:
+        return [self.resolve(credentials)]
+
+
 class FixtureMedia:
     def __init__(self, assets: dict[tuple[str, str], dict]):
         self._assets = assets

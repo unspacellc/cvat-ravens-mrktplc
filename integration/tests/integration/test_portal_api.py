@@ -144,3 +144,15 @@ def test_batch_detail_reports_counts_and_operation(world):
     w, p = world, world["portal"]
     d = p.call("GET", f"/batches/{w['batch_a']['batch_id']}", w["rev"]).json()
     assert sum(d["job_counts"].values()) == 2 and d["operation"]["state"] == "succeeded"
+
+
+def test_me_and_tenant_listing(world):
+    w, p = world, world["portal"]
+    assert p.call("GET", "/me", w["rev"]).json()["roles"] == ["reviewer"]
+    shared = f"multi-{uuid.uuid4().hex[:6]}"
+    p.add_member(w["ta"], shared, "labeler")
+    p.add_member(w["tb"], shared, "admin")
+    tenants = {t["tenant_id"]: t["roles"] for t in p.call("GET", "/me/tenants", shared).json()["items"]}
+    assert set(tenants) == {w["ta"], w["tb"]} and "admin" in tenants[w["tb"]]
+    assert p.call("GET", "/me/tenants", None).status_code == 401
+    assert p.call("GET", "/me/tenants", "stranger").json()["items"] == []

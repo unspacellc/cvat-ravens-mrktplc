@@ -21,6 +21,9 @@ class IdentityContext(Protocol):
         """Server-side tenant membership resolution. `tenant_hint` only selects among memberships the user already
         holds. Raises PermissionError when unauthenticated/unknown/not a member."""
 
+    def memberships(self, credentials: str) -> list[Principal]:
+        """All tenants the authenticated user may act in (empty list is valid), for tenant selection."""
+
 
 @runtime_checkable
 class MediaCatalog(Protocol):

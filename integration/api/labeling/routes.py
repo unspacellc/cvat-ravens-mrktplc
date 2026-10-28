@@ -119,6 +119,24 @@ def build_router(deps: Deps) -> APIRouter:
             raise ApiError(404, "not_found", "job not found")
         return row
 
+    def bearer(authorization: str | None) -> str:
+        if not authorization or not authorization.lower().startswith("bearer "):
+            raise ApiError(401, "unauthenticated", "missing bearer token")
+        return authorization[7:].strip()
+
+    @r.get("/me/tenants")
+    def my_tenants(authorization: Annotated[str | None, Header()] = None):
+        """Token-only: lets a multi-tenant user choose a tenant before any tenant-scoped call."""
+        try:
+            members = deps.identity.memberships(bearer(authorization))
+        except PermissionError:
+            raise ApiError(401, "invalid_token", "invalid or expired token") from None
+        return {"items": [{"tenant_id": m.tenant_id, "roles": sorted(m.roles)} for m in members]}
+
+    @r.get("/me")
+    def me(p: P):
+        return {"user_id": p.user_id, "tenant_id": p.tenant_id, "roles": sorted(p.roles), "email": p.email}
+
     @r.get("/jobs")
     def list_jobs(p: P, s: S, state: str | None = None, assignee: str | None = None, batch_id: uuid.UUID | None = None,
                   limit: Annotated[int, Query(ge=1, le=200)] = 50, cursor: Annotated[int, Query(ge=0)] = 0):

@@ -86,3 +86,6 @@ Marketplace stack to match (`../frontend/unspaced/packages/web`): React Router 7
 
 ## Verification
 `uv run pytest tests` (existing 63 plus new), `ruff`, web `typecheck`/`lint`/`vitest`/`build`/Playwright, then `deploy/stack.sh up` with `WITH_IDP=1` and the e2e journeys. The phase doc records outputs and any unmet gate (e.g. Cognito pool test) rather than claiming it.
+
+## Phase 2 review (2026-10-28)
+Backend, CVAT linking patch, web modules and docs done; 89 tests + 19 web tests pass. Gate verdict and honest gaps in `integration/docs/phases/phase-2.md` (Cognito untested; editor browser hand-off unverified; supervisor role finding).

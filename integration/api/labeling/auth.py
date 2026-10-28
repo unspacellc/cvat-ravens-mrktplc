@@ -61,17 +61,26 @@ class JwtIdentity:
             raise PermissionError("token not issued for this application")
         return claims
 
-    def resolve(self, credentials: str, tenant_hint: str | None = None) -> Principal:
-        claims = self.verify(credentials)
-        sub = claims["sub"]
+    def _members(self, sub: str) -> list[LabelingMember]:
         with self._sf() as s:
-            rows = list(s.scalars(select(LabelingMember).where(LabelingMember.user_id == sub, LabelingMember.status == "active")))
+            return list(s.scalars(select(LabelingMember).where(LabelingMember.user_id == sub, LabelingMember.status == "active")
+                                  .order_by(LabelingMember.tenant_id)))
+
+    @staticmethod
+    def _principal(m: LabelingMember) -> Principal:
+        roles = frozenset(m.roles) | ({"labeler", "reviewer", "creator"} if "admin" in m.roles else frozenset())
+        return Principal(user_id=m.user_id, tenant_id=m.tenant_id, roles=roles, email=m.email)
+
+    def memberships(self, credentials: str) -> list[Principal]:
+        """Every tenant the token's user belongs to (for tenant selection). Raises PermissionError on a bad token."""
+        return [self._principal(m) for m in self._members(self.verify(credentials)["sub"])]
+
+    def resolve(self, credentials: str, tenant_hint: str | None = None) -> Principal:
+        rows = self._members(self.verify(credentials)["sub"])
         if tenant_hint is not None:
             rows = [r for r in rows if r.tenant_id == tenant_hint]
         if not rows:
             raise PermissionError("no active membership")
         if len(rows) > 1:
             raise PermissionError("tenant selection required")  # ambiguous: caller must send X-Labeling-Tenant
-        m = rows[0]
-        roles = frozenset(m.roles) | ({"labeler", "reviewer", "creator"} if "admin" in m.roles else frozenset())
-        return Principal(user_id=sub, tenant_id=m.tenant_id, roles=roles, email=m.email)
+        return self._principal(rows[0])
