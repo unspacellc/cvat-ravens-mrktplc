@@ -13,16 +13,19 @@ from pydantic import BaseModel, Field
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session, sessionmaker
 
-from . import service
+from . import operations, review, sendoff, service
 from .adapters import IdentityContext, Principal
 from .config import Settings
 from .models import (
     CvatIdentityMapping,
+    DatasetVersion,
     LabelingBatch,
     LabelingJob,
     LabelingMember,
     LabelingTask,
     Operation,
+    ReviewEvent,
+    ReviewIssue,
     TenantCvatOrg,
 )
 
@@ -55,6 +58,25 @@ class BatchBody(BaseModel):
     name: str = Field(min_length=1, max_length=256)
     asset_ids: list[str] = Field(min_length=1)
     schema_version_id: uuid.UUID
+
+
+class IssueBody(BaseModel):
+    frame: int = Field(ge=0)
+    text: str = Field(min_length=1, max_length=2000)
+    position: list[float] | None = Field(default=None, min_length=4, max_length=4)
+    blocking: bool = True
+
+
+class TransitionBody(BaseModel):
+    command: str
+    expected_revision: int
+    reason: str | None = Field(default=None, max_length=2000)
+    reviewer_id: str | None = None
+    issues: list[IssueBody] = []
+    attestation: str | None = Field(default=None, max_length=2000)
+    expected_snapshot_sha256: str | None = Field(default=None, pattern="^[0-9a-f]{64}$")
+    resolved_issue_ids: list[uuid.UUID] = []
+    override: bool = False
 
 
 class MemberBody(BaseModel):
@@ -176,7 +198,10 @@ def build_router(deps: Deps) -> APIRouter:
             LabelingTask, (LabelingTask.tenant_id == LabelingJob.tenant_id) & (LabelingTask.id == LabelingJob.task_id))
             .where(LabelingJob.tenant_id == p.tenant_id, LabelingTask.batch_id == b.id).group_by(LabelingJob.portal_state)).all())
         op = s.scalar(select(Operation).where(Operation.tenant_id == p.tenant_id, Operation.subject_id == b.id).order_by(Operation.created_at.desc()))
+        dv = s.scalar(select(DatasetVersion).where(DatasetVersion.tenant_id == p.tenant_id, DatasetVersion.batch_id == b.id))
         return {"id": str(b.id), "name": b.name, "lifecycle": b.lifecycle, "revision": b.revision, "job_counts": counts,
+                "dataset_version": None if dv is None else {"id": str(dv.id), "status": dv.status},
+                "predecessor_version_id": str(b.predecessor_version_id) if b.predecessor_version_id else None,
                 "tasks": [{"id": str(t.id), "source_asset_id": t.source_asset_id, "status": t.status} for t in tasks],
                 "operation": None if op is None else {"id": str(op.id), "state": op.state, "error": op.error}}
 
@@ -239,6 +264,95 @@ def build_router(deps: Deps) -> APIRouter:
         url = f"{deps.settings.cvat_public_url.rstrip('/')}/api/auth/social/oidc/{deps.settings.oidc_provider_id}/login/?" + urlencode(
             {"process": "login", "next": nxt})
         return {"url": url, "job_id": str(job.id)}
+
+    @r.post("/jobs/{job_id}/transitions")
+    def transition(job_id: uuid.UUID, body: TransitionBody, p: P, s: S):
+        need(p, "labeler", "reviewer", "admin")
+        scoped_job(s, p, job_id)  # tenant + visibility 404 first, so foreign jobs reveal nothing
+        cmd = review.Command(name=body.command, expected_revision=body.expected_revision, reason=body.reason, reviewer_id=body.reviewer_id,
+                             issues=[review.IssueInput(i.frame, i.text, i.position, i.blocking) for i in body.issues],
+                             attestation=body.attestation, expected_snapshot_sha256=body.expected_snapshot_sha256,
+                             resolved_issue_ids=body.resolved_issue_ids, override=body.override)
+        try:
+            job = review.transition(s, deps.ctx, actor=p, job_id=job_id, cmd=cmd)
+            s.commit()
+        except service.Forbidden as e:
+            raise ApiError(403, "forbidden", str(e)) from None
+        except service.Conflict as e:
+            s.rollback()
+            raise ApiError(409, "illegal_transition" if "cannot" in str(e) else "revision_conflict", str(e)) from None
+        except service.Invalid as e:
+            s.rollback()
+            raise ApiError(422, "invalid_command", str(e)) from None
+        except service.NotFound as e:
+            raise ApiError(404, "not_found", str(e)) from None
+        return {"id": str(job.id), "portal_state": job.portal_state, "assignee_user_id": job.assignee_user_id, "revision": job.revision}
+
+    @r.get("/jobs/{job_id}/review")
+    def job_review(job_id: uuid.UUID, p: P, s: S):
+        """Evidence + open issues; for the assigned reviewer (or admin) also the hash of the content they would approve."""
+        need(p, "labeler", "reviewer", "admin")
+        job, _, _ = scoped_job(s, p, job_id)
+        events = s.scalars(select(ReviewEvent).where(ReviewEvent.tenant_id == p.tenant_id, ReviewEvent.job_id == job.id).order_by(ReviewEvent.created_at))
+        issues = s.scalars(select(ReviewIssue).where(ReviewIssue.tenant_id == p.tenant_id, ReviewIssue.job_id == job.id).order_by(ReviewIssue.created_at))
+        out = {"portal_state": job.portal_state, "revision": job.revision, "live_snapshot_sha256": None,
+               "events": [{"decision": e.decision, "actor_id": e.actor_id, "reason": e.reason, "annotation_revision": e.annotation_revision,
+                           "created_at": e.created_at.isoformat()} for e in events],
+               "issues": [{"id": str(i.id), "frame": i.frame, "position": i.position, "text": i.text, "blocking": i.blocking,
+                           "status": i.status} for i in issues]}
+        if job.portal_state == "in_review" and (job.assignee_user_id == p.user_id or "admin" in p.roles):
+            out["live_snapshot_sha256"] = review.live_review_sha(deps.ctx, s, p.tenant_id, job.id)
+        return out
+
+    @r.post("/batches/{batch_id}/send-offs", status_code=202)
+    def create_send_off(batch_id: uuid.UUID, p: P, s: S, idempotency_key: Annotated[str | None, Header()] = None):
+        need(p, "admin")
+        if not idempotency_key:
+            raise ApiError(400, "idempotency_key_required", "Idempotency-Key header is required")
+        try:
+            dv, op = sendoff.request_send_off(s, deps.ctx, tenant_id=p.tenant_id, batch_id=batch_id, idempotency_key=idempotency_key)
+            s.commit()
+        except service.NotFound as e:
+            raise ApiError(404, "not_found", str(e)) from None
+        except sendoff.NotEligible as e:
+            s.rollback()
+            raise ApiError(409, "not_eligible", str(e), {"reasons": e.reasons}) from None
+        except service.Conflict as e:
+            s.rollback()
+            raise ApiError(409, "conflict", str(e)) from None
+        except operations.IdempotencyConflict as e:
+            s.rollback()
+            raise ApiError(409, "idempotency_conflict", str(e)) from None
+        return {"dataset_version_id": str(dv.id), "operation_id": str(op.id)}
+
+    @r.get("/dataset-versions/{version_id}")
+    def dataset_version(version_id: uuid.UUID, p: P, s: S):
+        need(p, "reviewer", "admin", "creator")
+        dv = s.scalar(select(DatasetVersion).where(DatasetVersion.tenant_id == p.tenant_id, DatasetVersion.id == version_id))
+        if dv is None:
+            raise ApiError(404, "not_found", "dataset version not found")
+        return {"id": str(dv.id), "batch_id": str(dv.batch_id), "status": dv.status, "predecessor_version_id": str(dv.predecessor_version_id) if dv.predecessor_version_id else None,
+                "manifest_uri": dv.manifest_uri, "manifest_sha256": dv.manifest_sha256, "published_at": dv.published_at.isoformat() if dv.published_at else None}
+
+    @r.post("/dataset-versions/{version_id}/revision-batches", status_code=202)
+    def revision_batch(version_id: uuid.UUID, p: P, s: S, idempotency_key: Annotated[str | None, Header()] = None):
+        need(p, "creator", "admin")
+        if not idempotency_key:
+            raise ApiError(400, "idempotency_key_required", "Idempotency-Key header is required")
+        try:
+            batch, op = service.create_revision_batch(s, deps.ctx, tenant_id=p.tenant_id, version_id=version_id, idempotency_key=idempotency_key)
+            s.commit()
+        except service.NotFound as e:
+            raise ApiError(404, "not_found", str(e)) from None
+        return {"batch_id": str(batch.id), "operation_id": str(op.id)}
+
+    @r.get("/reviewers")
+    def reviewers(p: P, s: S):
+        """Who a submitter may pick as reviewer (no other member data is exposed to labelers)."""
+        need(p, "labeler", "reviewer", "admin", "creator")
+        rows = s.scalars(select(LabelingMember).where(LabelingMember.tenant_id == p.tenant_id, LabelingMember.status == "active",
+                                                      LabelingMember.roles.any("reviewer")))
+        return {"items": [{"user_id": m.user_id, "email": m.email} for m in rows if m.user_id != p.user_id]}
 
     @r.get("/members")
     def list_members(p: P, s: S):

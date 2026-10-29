@@ -45,6 +45,36 @@ export interface BatchDetailData {
   job_counts: Record<string, number>;
   tasks: { id: string; source_asset_id: string; status: string }[];
   operation: { id: string; state: string; error: { message?: string } | null } | null;
+  dataset_version?: { id: string; status: string } | null;
+  predecessor_version_id?: string | null;
+}
+
+export interface ReviewIssue {
+  id: string;
+  frame: number;
+  position: number[] | null;
+  text: string;
+  blocking: boolean;
+  status: "open" | "resolved";
+}
+
+export interface ReviewData {
+  portal_state: string;
+  revision: number;
+  live_snapshot_sha256: string | null;
+  events: { decision: string; actor_id: string; reason: string | null; annotation_revision: number; created_at: string }[];
+  issues: ReviewIssue[];
+}
+
+export type TransitionBody =
+  | { command: "submit"; reviewer_id: string; resolved_issue_ids?: string[] }
+  | { command: "approve"; attestation: string; expected_snapshot_sha256: string }
+  | { command: "reject"; reason: string; issues: { frame: number; text: string }[] }
+  | { command: "reopen"; reason: string };
+
+export interface Reviewer {
+  user_id: string;
+  email: string | null;
 }
 
 export interface Me {

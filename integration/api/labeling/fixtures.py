@@ -44,13 +44,65 @@ class FixtureModels:
 
 
 class FixturePublisher:
+    """Idempotent on dataset_version_id. `fail_next` injects transient catalog outages."""
+
     def __init__(self):
         self.acks: dict[str, str] = {}
         self.calls = 0
+        self.fail_next = 0
 
     def register(self, tenant_id, dataset_version_id, manifest_uri, manifest_sha256) -> str:
         self.calls += 1
+        if self.fail_next:
+            self.fail_next -= 1
+            raise ConnectionError("catalog unavailable")
         return self.acks.setdefault(dataset_version_id, f"ack-{dataset_version_id}")
+
+
+class LocalObjectStore:
+    """Write-once local store (dev/test): O_EXCL create, read-only files, refuses overwrite with different bytes."""
+
+    def __init__(self, root):
+        from pathlib import Path
+        self.root = Path(root)
+        self.root.mkdir(parents=True, exist_ok=True)
+
+    def _path(self, key: str):
+        p = (self.root / key).resolve()
+        if self.root.resolve() not in p.parents:
+            raise PermissionError("key escapes store root")
+        return p
+
+    def put_if_absent(self, key: str, data: bytes) -> tuple[str, str]:
+        import hashlib
+        import os
+
+        from .adapters import ImmutableObjectError
+
+        p = self._path(key)
+        sha = hashlib.sha256(data).hexdigest()
+        p.parent.mkdir(parents=True, exist_ok=True)
+        try:
+            fd = os.open(p, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o444)
+        except FileExistsError:
+            if hashlib.sha256(p.read_bytes()).hexdigest() != sha:
+                raise ImmutableObjectError(f"{key} exists with different content") from None
+            return f"file://{p}", sha
+        with os.fdopen(fd, "wb") as fh:
+            fh.write(data)
+        return f"file://{p}", sha
+
+    def exists(self, key: str):
+        import hashlib
+        p = self._path(key)
+        return (f"file://{p}", hashlib.sha256(p.read_bytes()).hexdigest()) if p.exists() else None
+
+    def get(self, uri: str) -> bytes:
+        from pathlib import Path
+        p = Path(uri.removeprefix("file://")).resolve()
+        if self.root.resolve() not in p.parents:
+            raise PermissionError("uri outside store")
+        return p.read_bytes()
 
 
 class RecordingSink:

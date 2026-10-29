@@ -48,6 +48,24 @@ class DatasetPublisher(Protocol):
         """Idempotent on dataset_version_id; returns a catalog ack id. Never creates a second version on replay."""
 
 
+class ImmutableObjectError(Exception):
+    """A write targeted an existing key with different content."""
+
+
+@runtime_checkable
+class ObjectStore(Protocol):
+    """Write-once object storage for snapshots, exports and manifests. Production: S3 with a bucket policy that denies
+    overwrite/delete to the application role (S3 versioning alone is not immutability)."""
+
+    def put_if_absent(self, key: str, data: bytes) -> tuple[str, str]:
+        """Returns (uri, sha256). Same key + same bytes is a no-op; same key + different bytes raises ImmutableObjectError."""
+
+    def exists(self, key: str) -> tuple[str, str] | None:
+        """(uri, sha256) of an existing object, else None. Lets a resumed operation adopt what a crashed run wrote."""
+
+    def get(self, uri: str) -> bytes: ...
+
+
 @runtime_checkable
 class NotificationSink(Protocol):
     def notify(self, tenant_id: str, user_id: str, kind: str, payload: dict) -> None:

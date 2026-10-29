@@ -36,3 +36,13 @@ def apply_cvat_job(session: Session, job: LabelingJob, cvat_job: dict) -> bool:
     job.synced_at = datetime.now(UTC)
     session.flush()
     return changed
+
+
+def apply_own_write(session: Session, job: LabelingJob, cvat_job: dict) -> None:
+    """Record a CVAT job state that *the portal itself just wrote* (stage/state/assignee PATCH response). The new
+    `updated_date` is adopted without bumping `annotation_revision`, otherwise every portal transition would look like
+    an annotator edit. Content integrity is checked by snapshot hash, never by timestamp."""
+    job.cvat_updated_date = _ts(cvat_job.get("updated_date")) or job.cvat_updated_date
+    job.cvat_stage, job.cvat_state = cvat_job.get("stage"), cvat_job.get("state")
+    job.synced_at = datetime.now(UTC)
+    session.flush()

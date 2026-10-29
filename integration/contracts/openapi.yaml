@@ -66,6 +66,29 @@ paths:
       responses:
         '202': {description: Accepted; replay with the same key returns the same operation, content: {application/json: {schema: {$ref: '#/components/schemas/OperationAccepted'}}}}
         '409': {$ref: '#/components/responses/Error'}
+  /labeling/jobs/{job_id}/review:
+    get:
+      operationId: getJobReview
+      description: Review events, frame issues and (for the assigned reviewer/admin) the hash of the content that would be approved.
+      parameters: [{$ref: '#/components/parameters/JobId'}]
+      responses:
+        '200': {description: Review state, content: {application/json: {schema: {type: object}}}}
+        '404': {$ref: '#/components/responses/Error'}
+  /labeling/dataset-versions/{version_id}:
+    get:
+      operationId: getDatasetVersion
+      parameters: [{name: version_id, in: path, required: true, schema: {type: string, format: uuid}}]
+      responses:
+        '200': {description: Dataset version, content: {application/json: {schema: {type: object}}}}
+        '404': {$ref: '#/components/responses/Error'}
+  /labeling/dataset-versions/{version_id}/revision-batches:
+    post:
+      operationId: startRevisionBatch
+      description: New batch seeded from a published version's approved annotations; the published version is never modified.
+      parameters: [{name: version_id, in: path, required: true, schema: {type: string, format: uuid}}, {$ref: '#/components/parameters/IdempotencyKey'}]
+      responses:
+        '202': {description: Accepted, content: {application/json: {schema: {$ref: '#/components/schemas/OperationAccepted'}}}}
+        '404': {$ref: '#/components/responses/Error'}
   /labeling/operations/{operation_id}:
     get:
       operationId: getOperation

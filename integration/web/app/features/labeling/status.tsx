@@ -2,20 +2,20 @@ import { useLabeling } from "./api";
 
 const TONES: Record<string, string> = {
   created: "bg-slate-200 text-slate-900",
-  in_progress: "bg-blue-100 text-blue-950",
-  submitted: "bg-amber-100 text-amber-950",
-  rejected: "bg-red-100 text-red-950",
+  annotating: "bg-blue-100 text-blue-950",
+  in_review: "bg-amber-100 text-amber-950",
+  rework: "bg-red-100 text-red-950",
   approved: "bg-green-100 text-green-950",
-  published: "bg-green-100 text-green-950",
+  sent_off: "bg-green-100 text-green-950",
 };
 
 const LABELS: Record<string, string> = {
   created: "Not started",
-  in_progress: "In progress",
-  submitted: "In review",
-  rejected: "Needs rework",
+  annotating: "In progress",
+  in_review: "In review",
+  rework: "Needs rework",
   approved: "Approved",
-  published: "Published",
+  sent_off: "Sent off",
 };
 
 /** Text label first; colour is reinforcement only. */

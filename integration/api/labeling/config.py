@@ -18,6 +18,9 @@ class Settings:
     # Browser-facing CVAT origin and the OIDC provider id CVAT exposes (editor launch targets this only).
     cvat_public_url: str = field(default_factory=lambda: os.environ.get("CVAT_PUBLIC_URL", os.environ.get("CVAT_URL", "http://localhost:8080")))
     oidc_provider_id: str = field(default_factory=lambda: os.environ.get("LABELING_OIDC_PROVIDER_ID", "portal"))
+    cvat_server_version: str = field(default_factory=lambda: os.environ.get("CVAT_SERVER_VERSION", "2.80.0"))
+    cvat_image_digest: str = field(default_factory=lambda: os.environ.get(
+        "CVAT_IMAGE_DIGEST", "sha256:955ae3b34089fbd57d22bf9a692cef82c99647f9970dd68a716448eec252f425"))
     reconcile_interval_s: int = field(default_factory=lambda: int(os.environ.get("LABELING_RECONCILE_INTERVAL_S", "300")))
     segment_size: int = field(default_factory=lambda: int(os.environ.get("LABELING_SEGMENT_SIZE", "300")))
 

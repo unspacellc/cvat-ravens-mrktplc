@@ -6,8 +6,9 @@ from datetime import timedelta
 
 from sqlalchemy import select
 
+from . import review
 from .cvat_client import CvatError
-from .models import LabelingJob, TenantCvatOrg
+from .models import LabelingJob, LabelingTask, TenantCvatOrg
 from .operations import now
 from .projection import apply_cvat_job
 from .service import Ctx
@@ -37,7 +38,10 @@ def reconcile_tenant(session_factory, ctx: Ctx, tenant_id: str, *, stale_after_s
                 else:
                     stats["errors"] += 1
                 continue
-            stats["changed"] += int(apply_cvat_job(s, job, remote))
+            if apply_cvat_job(s, job, remote):
+                stats["changed"] += 1
+                if job.portal_state == "approved" and ctx.store is not None:  # invalidate approvals whose content moved
+                    review.verify_approval(s, ctx, job, s.get(LabelingTask, job.task_id), org)
         s.commit()
     return stats
 

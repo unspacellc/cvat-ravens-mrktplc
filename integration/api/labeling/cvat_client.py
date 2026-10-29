@@ -116,3 +116,42 @@ class CvatClient:
 
     def set_job_assignee(self, org: str, job_id: int, cvat_user_id: int | None) -> dict:
         return self._req("PATCH", f"/api/jobs/{job_id}", org=org, json={"assignee": cvat_user_id}).json()
+
+    def update_job(self, org: str, job_id: int, **fields) -> dict:
+        """stage / state / assignee (assignee is a CVAT user id or None)."""
+        return self._req("PATCH", f"/api/jobs/{job_id}", org=org, json=fields).json()
+
+    def get_job_annotations(self, org: str, job_id: int) -> dict:
+        return self._req("GET", f"/api/jobs/{job_id}/annotations", org=org).json()
+
+    def put_job_annotations(self, org: str, job_id: int, data: dict) -> dict:
+        """Replace a job's annotations with LabeledData JSON (used for revision-batch seeding and pre-label import)."""
+        return self._req("PUT", f"/api/jobs/{job_id}/annotations", org=org, json=data).json()
+
+    def task_labels(self, org: str, task_id: int) -> dict[int, str]:
+        body = self._req("GET", "/api/labels", org=org, params={"task_id": task_id, "page_size": 100}).json()
+        return {lb["id"]: lb["name"] for lb in body["results"]}
+
+    def create_issue(self, org: str, job_id: int, frame: int, position: list[float], message: str) -> dict:
+        return self._req("POST", "/api/issues", org=org, json={"frame": frame, "position": position, "job": job_id, "message": message}).json()
+
+    # --- write freeze (guard patch; superuser only) ---------------------------------
+    def freeze_task(self, task_id: int, send_off_id: str) -> None:
+        self._req("PUT", f"/api/labeling-guard/tasks/{task_id}/freeze", json={"send_off_id": send_off_id})
+
+    def unfreeze_task(self, task_id: int) -> None:
+        self._req("DELETE", f"/api/labeling-guard/tasks/{task_id}/freeze", ok=(200, 204, 404))
+
+    def export_task_native(self, org: str, task_id: int, *, fmt: str = "CVAT for video 1.1", timeout: float = 300) -> bytes:
+        """Task-level native export (annotations only). Returns the zip bytes."""
+        r = self._req("POST", f"/api/tasks/{task_id}/dataset/export", org=org, params={"format": fmt, "save_images": "false"})
+        rq_id, deadline = r.json()["rq_id"], time.time() + timeout
+        while time.time() < deadline:
+            rq = self._req("GET", f"/api/requests/{rq_id}", org=org).json()
+            if rq["status"] == "finished":
+                url = rq["result_url"].replace(str(self._http.base_url).rstrip("/"), "")
+                return self._req("GET", url, org=org, follow_redirects=True).content
+            if rq["status"] == "failed":
+                raise CvatError(f"export of task {task_id} failed: {rq.get('message')}", None, True)
+            time.sleep(1)
+        raise CvatError(f"export of task {task_id} timed out", None, True)

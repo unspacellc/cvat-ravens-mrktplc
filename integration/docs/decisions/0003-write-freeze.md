@@ -23,6 +23,9 @@ restores writes; a browser session established **before** the freeze is blocked 
 freeze; in-container worker-path call (`patch_job_data`/`put_task_data`) raises `TaskFrozenError`; the freezer waited
 ≈3.0 s for a deliberately slow in-flight writer, which committed before the freeze took effect.
 
+## Phase 3 update
+Send-off (ADR 0007) uses this guard end to end. Export POSTs (`…/dataset/export`) are exempted from the request layer since they only read. The request-layer race below is mitigated for *content* by re-verifying approved snapshot hashes after the barrier.
+
 ## Known gaps (must close or explicitly scope before Phase 3 acceptance)
 - Request-layer check is **not** atomic with the mutation (annotation writes *are*). A reopen/PATCH racing the freeze
   could slip through; send-off step 2 (reconcile revisions after the barrier) must catch it.

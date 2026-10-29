@@ -3,14 +3,15 @@
 from __future__ import annotations
 
 import logging
+import os
 import signal
 import time
 
-from api.labeling import operations, provisioning, reconcile, webhooks
+from api.labeling import operations, provisioning, reconcile, sendoff, webhooks
 from api.labeling.config import Settings
 from api.labeling.cvat_client import CvatClient
 from api.labeling.db import make_engine, make_session_factory
-from api.labeling.fixtures import FixtureMedia, LocalClipSource
+from api.labeling.fixtures import FixtureMedia, FixturePublisher, LocalClipSource, LocalObjectStore
 from api.labeling.service import Ctx
 
 log = logging.getLogger("labeling.worker")
@@ -19,13 +20,14 @@ _stop = False
 
 def build_ctx(settings: Settings, clip_root: str) -> Ctx:
     # Production binds MediaCatalog/ClipSource to the host (S3-backed); the standalone worker uses local fixtures.
-    return Ctx(settings=settings, cvat=CvatClient(settings.cvat_url, settings.cvat_service_token), media=FixtureMedia({}), clips=LocalClipSource(clip_root))
+    return Ctx(settings=settings, cvat=CvatClient(settings.cvat_url, settings.cvat_service_token), media=FixtureMedia({}), clips=LocalClipSource(clip_root),
+               store=LocalObjectStore(os.environ.get("LABELING_STORE_ROOT", "var/objects")), publisher=FixturePublisher())
 
 
 def tick(session_factory, ctx: Ctx, last_reconcile: float) -> float:
     """One pass: run queued operations, drain the webhook inbox, reconcile if the interval elapsed. Returns the
     timestamp of the last reconcile."""
-    handlers = {"provision_batch": provisioning.provision_batch(ctx)}
+    handlers = {"provision_batch": provisioning.provision_batch(ctx), "send_off": sendoff.send_off(ctx)}
     while operations.run_one(session_factory, handlers):
         pass
     while webhooks.process_inbox(session_factory, ctx):

@@ -39,8 +39,8 @@ describe("Board", () => {
     await userEvent.selectOptions(screen.getByLabelText(/filter by assignment/i), "unassigned");
     expect(screen.queryByText("Crossing batch")).toBeNull();
     expect(screen.getByText("Loose job")).toBeInTheDocument();
-    await userEvent.selectOptions(screen.getByLabelText(/filter by status/i), "submitted");
-    expect(calls.some((c) => c.url.includes("state=submitted"))).toBe(true);
+    await userEvent.selectOptions(screen.getByLabelText(/filter by status/i), "in_review");
+    expect(calls.some((c) => c.url.includes("state=in_review"))).toBe(true);
   });
 
   it("assigns with the job's current revision", async () => {

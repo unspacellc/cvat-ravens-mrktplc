@@ -8,7 +8,7 @@ import { Async, Empty } from "./states";
 import { StatusBadge, SyncAge } from "./status";
 import type { Job, Role } from "./types";
 
-const STATES = ["created", "in_progress", "submitted", "rejected", "approved", "published"];
+const STATES = ["created", "annotating", "in_review", "rework", "approved", "sent_off"];
 
 /** Tenant-wide job board for leads/admins/reviewers. Assignment is shown only to roles the server would allow. */
 export function Board({ roles, batchId }: { roles: Role[]; batchId?: string }) {

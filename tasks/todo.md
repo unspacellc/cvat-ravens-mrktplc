@@ -89,3 +89,19 @@ Marketplace stack to match (`../frontend/unspaced/packages/web`): React Router 7
 
 ## Phase 2 review (2026-10-28)
 Backend, CVAT linking patch, web modules and docs done; 89 tests + 19 web tests pass. Gate verdict and honest gaps in `integration/docs/phases/phase-2.md` (Cognito untested; editor browser hand-off unverified; supervisor role finding).
+
+# Phase 3 plan — Review and immutable delivery (2026-10-28)
+Owner: "wire to accept Cognito, push, continue to Phase 3 + 4" (done: Cognito config `LABELING_COGNITO_*`, branches pushed).
+Assumptions: portal-owned frame issues (CVAT mirror best-effort); reviewer independent of annotator unless admin override with reason;
+reviewer is the CVAT assignee while in review (labeler loses write access); approval is content-bound (sha256 of canonical annotations) not timestamp-bound.
+
+1. Models+migration 0004 (review_event, annotation_snapshot immutable via trigger, review_issue, dataset_version, job/batch columns) -> alembic upgrade + schema test.
+2. SnapshotStore/ArtifactStore + DatasetPublisher fixtures (put-if-absent, no overwrite) -> unit tests.
+3. review.py service: submit/resubmit/reject/approve/reopen with expected revision, snapshots, issues, CVAT stage/state/assignee -> real-CVAT tests.
+4. sendoff.py: eligibility, freeze barrier, hash re-verify, export native+canonical, manifest (schema-validated), register, outbox -> failure/replay/race tests.
+5. Revision batch from a published version (seed annotations; original unchanged) -> test.
+6. Routes: POST /jobs/{id}/transitions, issues, POST /batches/{id}/send-offs, revision batch; web review queue + actions.
+7. ADR 0007, phase-3.md with honest gate verdict; commit; then Phase 4.
+
+## Phase 3 review (2026-10-28)
+Review/snapshots/send-off/revision batches built; gate met on fixtures (see integration/docs/phases/phase-3.md). 102+ backend tests, 28 web tests pass.

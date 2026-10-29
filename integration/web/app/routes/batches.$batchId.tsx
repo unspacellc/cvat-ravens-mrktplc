@@ -1,7 +1,8 @@
-import { useParams } from "react-router";
+import { useOutletContext, useParams } from "react-router";
 
-import { BatchDetail } from "~/features/labeling";
+import { BatchDetail, type Me } from "~/features/labeling";
 
 export default function BatchRoute() {
-  return <BatchDetail batchId={useParams().batchId!} />;
+  const { me } = useOutletContext<{ me: Me }>();
+  return <BatchDetail batchId={useParams().batchId!} roles={me.roles} />;
 }

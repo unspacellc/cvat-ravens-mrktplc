@@ -10,7 +10,7 @@ import jwt
 from cryptography.hazmat.primitives.asymmetric import rsa
 from fastapi.testclient import TestClient
 
-from api.labeling import operations, provisioning, service
+from api.labeling import operations, provisioning, sendoff, service
 from api.labeling.app import create_app
 from api.labeling.auth import JwtConfig, JwtIdentity
 from api.labeling.models import LabelingMember
@@ -52,7 +52,7 @@ class Portal:
             s.commit()
 
     def run_operations(self, op_id):
-        h = {"provision_batch": provisioning.provision_batch(self.ctx)}
+        h = {"provision_batch": provisioning.provision_batch(self.ctx), "send_off": sendoff.send_off(self.ctx)}
         while operations.run_one(self.session_factory, h, op_id=uuid.UUID(str(op_id))):
             pass
 

@@ -51,6 +51,9 @@ def test_rest_writes_blocked_reads_allowed_and_unfreeze(frozen_setup, admin):
     # reads (needed for send-off export) still work
     assert api.get(ann).status_code == 200
     assert len(api.get(ann).json()["shapes"]) == 1
+    # an export is a POST that only reads: it must stay possible on a frozen task (send-off exports after the barrier)
+    ex = api.post(f"/api/tasks/{task['id']}/dataset/export", params={"format": "CVAT for video 1.1", "save_images": "false"})
+    assert ex.status_code == 202, ex.text
 
     admin.http.delete(f"/api/labeling-guard/tasks/{task['id']}/freeze")
     assert api.patch(ann, params={"action": "create"}, json=body).status_code == 200

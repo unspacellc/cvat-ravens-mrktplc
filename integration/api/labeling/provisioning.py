@@ -6,6 +6,7 @@ Every step commits its own progress, and CVAT-side creates are find-before-creat
 
 from __future__ import annotations
 
+import json
 import logging
 from datetime import UTC, datetime
 
@@ -17,6 +18,8 @@ from .config import org_slug_for
 from .cvat_client import CvatError
 from .framemap import build_frame_map
 from .models import (
+    AnnotationSnapshot,
+    DatasetVersion,
     LabelingBatch,
     LabelingJob,
     LabelingProject,
@@ -90,6 +93,48 @@ def _provision_task(session: Session, ctx: Ctx, org: TenantCvatOrg, task: Labeli
     session.commit()
 
 
+def seed_revision(session: Session, ctx: Ctx, op: Operation, batch: LabelingBatch, org: TenantCvatOrg) -> None:
+    """Revision batch: copy the *published* annotations (snapshots named by the predecessor's revision_set) into the new
+    jobs, remapping label ids by name. Recorded per job in the operation so a retry never overwrites human edits."""
+    dv = session.get(DatasetVersion, batch.predecessor_version_id)
+    shas = set(dv.revision_set.values())
+    snaps = session.scalars(select(AnnotationSnapshot).join(LabelingJob, (LabelingJob.tenant_id == AnnotationSnapshot.tenant_id) & (
+        LabelingJob.id == AnnotationSnapshot.job_id)).join(LabelingTask, (LabelingTask.tenant_id == LabelingJob.tenant_id) & (
+        LabelingTask.id == LabelingJob.task_id)).where(AnnotationSnapshot.tenant_id == batch.tenant_id,
+                                                         LabelingTask.batch_id == dv.batch_id, AnnotationSnapshot.sha256.in_(shas))).all()
+    by_asset: dict[str, list[dict]] = {}
+    for sn in {sn.sha256: sn for sn in snaps}.values():  # submit and approve snapshots of unchanged work share a hash
+        doc = json.loads(ctx.store.get(sn.uri))
+        task_asset = session.scalar(select(LabelingTask.source_asset_id).join(LabelingJob, (LabelingJob.tenant_id == LabelingTask.tenant_id) & (
+            LabelingJob.task_id == LabelingTask.id)).where(LabelingJob.id == sn.job_id))
+        by_asset.setdefault(task_asset, []).append(doc)
+    done = set(op.progress.get("seeded_jobs", []))
+    for task in session.scalars(select(LabelingTask).where(LabelingTask.batch_id == batch.id)):
+        names = {v: k for k, v in ctx.cvat.task_labels(org.cvat_org_slug, task.cvat_task_id).items()}
+        for job in session.scalars(select(LabelingJob).where(LabelingJob.task_id == task.id)):
+            if str(job.id) in done:
+                continue
+            data = {"version": 0, "tags": [], "shapes": [], "tracks": []}
+            for doc in by_asset.get(task.source_asset_id, []):
+                for kind in data:
+                    if kind == "version":
+                        continue
+                    for item in doc["annotations"][kind]:
+                        frames = [item["frame"]] if kind != "tracks" else [sh["frame"] for sh in item["shapes"]]
+                        if kind == "tracks" or job.start_frame <= item["frame"] <= job.stop_frame:
+                            if kind == "tracks" and not all(job.start_frame <= f <= job.stop_frame for f in frames):
+                                continue
+                            clean = {k: v for k, v in item.items() if k != "id"}
+                            clean["label_id"] = names[doc["labels"][str(item["label_id"])]]
+                            if kind == "tracks":
+                                clean["shapes"] = [{k: v for k, v in sh.items() if k != "id"} for sh in item["shapes"]]
+                            data[kind].append(clean)
+            ctx.cvat.put_job_annotations(org.cvat_org_slug, job.cvat_job_id, data)
+            done.add(str(job.id))
+            op.progress = {**op.progress, "seeded_jobs": sorted(done)}
+            session.commit()
+
+
 def provision_batch(ctx: Ctx):
     def handler(session: Session, op: Operation) -> None:
         batch = session.get(LabelingBatch, op.subject_id)
@@ -111,6 +156,8 @@ def provision_batch(ctx: Ctx):
         if failures:
             err = CvatError("; ".join(str(f) for f in failures), None, any(f.retryable for f in failures))
             raise err
+        if batch.predecessor_version_id:
+            seed_revision(session, ctx, op, batch, org)
         batch.lifecycle = "created"
         session.commit()
 

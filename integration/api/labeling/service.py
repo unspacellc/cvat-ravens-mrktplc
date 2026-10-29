@@ -11,11 +11,12 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from . import operations
-from .adapters import ClipSource, MediaCatalog
+from .adapters import ClipSource, DatasetPublisher, MediaCatalog, ObjectStore
 from .config import Settings, cvat_role_for, cvat_username_for
 from .cvat_client import CvatClient
 from .models import (
     CvatIdentityMapping,
+    DatasetVersion,
     LabelingBatch,
     LabelingJob,
     LabelingMember,
@@ -24,6 +25,7 @@ from .models import (
     LabelSchemaVersion,
     TenantCvatOrg,
 )
+from .projection import apply_own_write
 
 
 @dataclass
@@ -32,6 +34,8 @@ class Ctx:
     cvat: CvatClient
     media: MediaCatalog
     clips: ClipSource
+    store: ObjectStore | None = None  # snapshots/exports/manifests (Phase 3)
+    publisher: DatasetPublisher | None = None
 
 
 class NotFound(Exception):
@@ -59,10 +63,12 @@ def register_schema(session: Session, tenant_id: str, semver: str, labels: list[
 
 
 def create_batch(session: Session, ctx: Ctx, *, tenant_id: str, name: str, asset_ids: list[str], schema_version_id: uuid.UUID,
-                 idempotency_key: str, segment_size: int | None = None) -> tuple[LabelingBatch, operations.Operation]:
+                 idempotency_key: str, segment_size: int | None = None,
+                 predecessor_version_id: uuid.UUID | None = None) -> tuple[LabelingBatch, operations.Operation]:
     """Validate against the caller's tenant only, then persist batch/tasks and enqueue provisioning (202 semantics)."""
     segment_size = segment_size or ctx.settings.segment_size
-    payload = {"name": name, "assets": asset_ids, "schema": str(schema_version_id), "segment_size": segment_size}
+    payload = {"name": name, "assets": asset_ids, "schema": str(schema_version_id), "segment_size": segment_size,
+               "predecessor": str(predecessor_version_id) if predecessor_version_id else None}
     batch_id = uuid.uuid4()
     op, created = operations.enqueue(session, tenant_id=tenant_id, kind="provision_batch", idempotency_key=idempotency_key,
                                      payload=payload, subject_id=batch_id)
@@ -85,7 +91,8 @@ def create_batch(session: Session, ctx: Ctx, *, tenant_id: str, name: str, asset
         project = LabelingProject(tenant_id=tenant_id, schema_version_id=schema.id, cvat_instance=ctx.settings.cvat_instance)
         session.add(project)
         session.flush()
-    batch = LabelingBatch(id=batch_id, tenant_id=tenant_id, project_id=project.id, name=name, media_manifest=refs)
+    batch = LabelingBatch(id=batch_id, tenant_id=tenant_id, project_id=project.id, name=name, media_manifest=refs,
+                          predecessor_version_id=predecessor_version_id)
     session.add(batch)
     session.flush()
     for ref in refs:
@@ -93,6 +100,22 @@ def create_batch(session: Session, ctx: Ctx, *, tenant_id: str, name: str, asset
                                  cvat_instance=ctx.settings.cvat_instance, segment_size=segment_size))
     session.flush()
     return batch, op
+
+
+def create_revision_batch(session: Session, ctx: Ctx, *, tenant_id: str, version_id: uuid.UUID, idempotency_key: str,
+                          name: str | None = None) -> tuple[LabelingBatch, operations.Operation]:
+    """Later edits to published work happen in a NEW batch (new CVAT tasks, seeded from the published annotations).
+    The published version, its objects and its frozen source tasks are never touched."""
+    dv = session.scalar(select(DatasetVersion).where(DatasetVersion.tenant_id == tenant_id, DatasetVersion.id == version_id))
+    if dv is None or dv.status != "published":
+        raise NotFound("published dataset version not found for tenant")
+    old = session.scalar(
+        select(LabelingBatch).where(LabelingBatch.tenant_id == tenant_id, LabelingBatch.id == dv.batch_id))
+    project = session.get(LabelingProject, old.project_id)
+    seg = session.scalar(select(LabelingTask.segment_size).where(LabelingTask.tenant_id == tenant_id, LabelingTask.batch_id == old.id).limit(1))
+    return create_batch(session, ctx, tenant_id=tenant_id, name=name or f"{old.name} (revision)", idempotency_key=idempotency_key,
+                        asset_ids=[m["source_asset_id"] for m in old.media_manifest], schema_version_id=project.schema_version_id,
+                        predecessor_version_id=dv.id, segment_size=seg)
 
 
 def _ensure_identity(session: Session, ctx: Ctx, org: TenantCvatOrg, tenant_id: str, user_id: str, username: str, email: str,
@@ -128,7 +151,8 @@ def assign_job(session: Session, ctx: Ctx, *, tenant_id: str, job_id: uuid.UUID,
         raise Conflict(f"job revision is {job.revision}, expected {expected_revision}")
     org = session.get(TenantCvatOrg, (tenant_id, job.cvat_instance))
     ident = _ensure_identity(session, ctx, org, tenant_id, user_id, username, email, uid, role)
-    ctx.cvat.set_job_assignee(org.cvat_org_slug, job.cvat_job_id, ident.cvat_user_id)
+    remote = ctx.cvat.set_job_assignee(org.cvat_org_slug, job.cvat_job_id, ident.cvat_user_id)
+    apply_own_write(session, job, remote)
     job.assignee_user_id = user_id
     job.revision += 1
     session.flush()
@@ -174,3 +198,7 @@ def remove_member(session: Session, ctx: Ctx, *, tenant_id: str, user_id: str) -
         ctx.cvat.revoke_member(org.cvat_org_slug, ident.cvat_username, deactivate=other_active is None)
         ident.status = "revoked"
     session.flush()
+
+
+class Forbidden(Exception):
+    pass

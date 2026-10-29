@@ -213,10 +213,10 @@ index 000000000..0c7050a9c
 +    return deco
 diff --git a/cvat/apps/labeling_guard/middleware.py b/cvat/apps/labeling_guard/middleware.py
 new file mode 100644
-index 000000000..e4cd00d40
+index 000000000..8a3ea2bc6
 --- /dev/null
 +++ b/cvat/apps/labeling_guard/middleware.py
-@@ -0,0 +1,50 @@
+@@ -0,0 +1,52 @@
 +# Copyright (C) CVAT.ai Corporation
 +#
 +# SPDX-License-Identifier: MIT
@@ -240,6 +240,8 @@ index 000000000..e4cd00d40
 +_TASK_RE = re.compile(r"^/api/tasks/(\d+)(?:/|$)")
 +_JOB_RE = re.compile(r"^/api/jobs/(\d+)(?:/|$)")
 +_LABEL_RE = re.compile(r"^/api/labels/(\d+)(?:/|$)")
++# Exports are POSTs that only read; send-off must export from frozen tasks.
++_READ_POST_RE = re.compile(r"^/api/(?:tasks|jobs)/\d+/dataset/export/?$")
 +
 +
 +class FrozenTaskMiddleware:
@@ -257,7 +259,7 @@ index 000000000..e4cd00d40
 +        return None
 +
 +    def __call__(self, request):
-+        if request.method not in _SAFE and (task_id := self._task_id(request.path)) is not None:
++        if request.method not in _SAFE and not _READ_POST_RE.match(request.path) and (task_id := self._task_id(request.path)) is not None:
 +            if is_frozen(task_id):
 +                return JsonResponse({"detail": f"task {task_id} is frozen by a batch send-off", "code": "task_frozen"}, status=423)
 +        return self.get_response(request)

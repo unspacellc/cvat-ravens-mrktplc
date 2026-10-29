@@ -1,13 +1,14 @@
 import { createContext, useContext, useMemo, type ReactNode } from "react";
 
-import type { BatchDetailData, BatchSummary, JobsPage, Me, Member } from "./types";
+import type { BatchDetailData, BatchSummary, JobsPage, Me, Member, ReviewData, Reviewer, TransitionBody } from "./types";
 
 export class ApiError extends Error {
   constructor(
     public status: number,
     public code: string,
     message: string,
-    public requestId?: string
+    public requestId?: string,
+    public details: Record<string, unknown> = {}
   ) {
     super(message);
   }
@@ -33,7 +34,7 @@ export function createApi(base = "/bff/labeling", doFetch: typeof fetch = (...a)
     if (res.status === 204) return undefined as T;
     const body = await res.json().catch(() => ({}));
     if (!res.ok) {
-      throw new ApiError(res.status, body.code ?? "error", body.error ?? res.statusText, body.requestId);
+      throw new ApiError(res.status, body.code ?? "error", body.error ?? res.statusText, body.requestId, body.details ?? {});
     }
     return body as T;
   }
@@ -55,6 +56,17 @@ export function createApi(base = "/bff/labeling", doFetch: typeof fetch = (...a)
         method: "POST",
         body: JSON.stringify({ user_id: userId, expected_revision: expectedRevision }),
       }),
+    review: (jobId: string) => call<ReviewData>(`/jobs/${jobId}/review`),
+    reviewers: () => call<{ items: Reviewer[] }>("/reviewers"),
+    transition: (jobId: string, expectedRevision: number, body: TransitionBody) =>
+      call<{ id: string; portal_state: string; revision: number }>(`/jobs/${jobId}/transitions`, {
+        method: "POST",
+        body: JSON.stringify({ expected_revision: expectedRevision, ...body }),
+      }),
+    sendOff: (batchId: string, key: string) =>
+      call<{ dataset_version_id: string; operation_id: string }>(`/batches/${batchId}/send-offs`, { method: "POST", headers: { "idempotency-key": key } }),
+    revisionBatch: (versionId: string, key: string) =>
+      call<{ batch_id: string; operation_id: string }>(`/dataset-versions/${versionId}/revision-batches`, { method: "POST", headers: { "idempotency-key": key } }),
     launch: (jobId: string) => call<{ url: string }>(`/jobs/${jobId}/editor-launch`, { method: "POST" }),
   };
 }

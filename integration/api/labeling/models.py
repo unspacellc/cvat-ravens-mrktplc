@@ -98,6 +98,7 @@ class LabelingBatch(Base, Stamped):
     media_manifest: Mapped[list] = mapped_column(JSONB, nullable=False)
     review_policy: Mapped[dict] = mapped_column(JSONB, nullable=False, default=lambda: {"mode": "independent_all"})
     instructions_version: Mapped[str | None] = mapped_column(String(64))
+    predecessor_version_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True))  # revision batch: the version it revises
     priority: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     due_date: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     lifecycle: Mapped[str] = mapped_column(String(24), nullable=False, default="provisioning")
@@ -145,6 +146,9 @@ class LabelingJob(Base, Stamped):
     annotation_revision: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
     revision: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
     synced_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    labeler_user_id: Mapped[str | None] = mapped_column(String(128))  # annotator of record (reviewer must differ)
+    reviewer_user_id: Mapped[str | None] = mapped_column(String(128))
+    approved_snapshot_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True))
     __table_args__ = (
         UniqueConstraint("tenant_id", "id"),
         UniqueConstraint("cvat_instance", "cvat_job_id"),
@@ -215,3 +219,75 @@ class LabelingMember(Base, Stamped):
     username: Mapped[str | None] = mapped_column(String(150))
     email: Mapped[str | None] = mapped_column(String(254))
     __table_args__ = (Index("ix_member_user", "user_id"),)
+
+
+class AnnotationSnapshot(Base):
+    """Immutable (DB trigger forbids UPDATE/DELETE): the exact annotations of a job at a review decision."""
+
+    __tablename__ = "annotation_snapshot"
+    id: Mapped[uuid.UUID] = _uuid_pk()
+    tenant_id: Mapped[str] = mapped_column(String(128), nullable=False)
+    job_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), nullable=False)
+    annotation_revision: Mapped[int] = mapped_column(Integer, nullable=False)
+    reason: Mapped[str] = mapped_column(String(24), nullable=False)  # submit|reject|approve|reopen|restore
+    format: Mapped[str] = mapped_column(String(48), nullable=False)
+    uri: Mapped[str] = mapped_column(Text, nullable=False)
+    sha256: Mapped[str] = mapped_column(String(64), nullable=False)
+    bytes: Mapped[int] = mapped_column(Integer, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    __table_args__ = (ForeignKeyConstraint(["tenant_id", "job_id"], ["labeling_job.tenant_id", "labeling_job.id"]),
+                      Index("ix_snapshot_job", "tenant_id", "job_id", "created_at"))
+
+
+class ReviewEvent(Base):
+    """Append-only audit of every review command (DB trigger forbids UPDATE/DELETE)."""
+
+    __tablename__ = "review_event"
+    id: Mapped[uuid.UUID] = _uuid_pk()
+    tenant_id: Mapped[str] = mapped_column(String(128), nullable=False)
+    job_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), nullable=False)
+    actor_id: Mapped[str] = mapped_column(String(128), nullable=False)
+    decision: Mapped[str] = mapped_column(String(24), nullable=False)  # submit|resubmit|reject|approve|reopen|approval_invalidated
+    reason: Mapped[str | None] = mapped_column(Text)
+    annotation_revision: Mapped[int] = mapped_column(Integer, nullable=False)
+    snapshot_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True))
+    details: Mapped[dict] = mapped_column(JSONB, nullable=False, default=dict)  # issue ids, attestation, override
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    __table_args__ = (ForeignKeyConstraint(["tenant_id", "job_id"], ["labeling_job.tenant_id", "labeling_job.id"]),
+                      Index("ix_review_event_job", "tenant_id", "job_id", "created_at"))
+
+
+class ReviewIssue(Base, Stamped):
+    __tablename__ = "review_issue"
+    id: Mapped[uuid.UUID] = _uuid_pk()
+    tenant_id: Mapped[str] = mapped_column(String(128), nullable=False)
+    job_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), nullable=False)
+    frame: Mapped[int] = mapped_column(Integer, nullable=False)  # CVAT task frame index
+    position: Mapped[list | None] = mapped_column(JSONB)  # [x1, y1, x2, y2]
+    text: Mapped[str] = mapped_column(Text, nullable=False)
+    blocking: Mapped[bool] = mapped_column(nullable=False, default=True)
+    status: Mapped[str] = mapped_column(String(12), nullable=False, default="open")  # open|resolved
+    created_by: Mapped[str] = mapped_column(String(128), nullable=False)
+    resolved_by: Mapped[str | None] = mapped_column(String(128))
+    cvat_issue_id: Mapped[int | None] = mapped_column(Integer)
+    __table_args__ = (ForeignKeyConstraint(["tenant_id", "job_id"], ["labeling_job.tenant_id", "labeling_job.id"]),
+                      Index("ix_issue_job", "tenant_id", "job_id", "status"))
+
+
+class DatasetVersion(Base, Stamped):
+    """One published version per send-off. The id is allocated when the send-off is created so replays reuse it."""
+
+    __tablename__ = "dataset_version"
+    id: Mapped[uuid.UUID] = _uuid_pk()
+    tenant_id: Mapped[str] = mapped_column(String(128), nullable=False)
+    batch_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), nullable=False)
+    operation_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), nullable=False)
+    predecessor_version_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True))
+    status: Mapped[str] = mapped_column(String(16), nullable=False, default="publishing")  # publishing|published
+    revision_set: Mapped[dict] = mapped_column(JSONB, nullable=False, default=dict)  # job id -> approved snapshot sha256
+    manifest_uri: Mapped[str | None] = mapped_column(Text)
+    manifest_sha256: Mapped[str | None] = mapped_column(String(64))
+    catalog_ack: Mapped[str | None] = mapped_column(String(256))
+    published_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    __table_args__ = (UniqueConstraint("tenant_id", "batch_id"), UniqueConstraint("tenant_id", "id"),
+                      ForeignKeyConstraint(["tenant_id", "batch_id"], ["labeling_batch.tenant_id", "labeling_batch.id"]))

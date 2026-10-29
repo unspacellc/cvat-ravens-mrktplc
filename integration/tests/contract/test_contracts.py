@@ -64,7 +64,7 @@ def test_openapi_is_valid():
     spec = yaml.safe_load((C / "openapi.yaml").read_text())
     validate_openapi(spec, base_uri=(C / "openapi.yaml").as_uri())
     ops = {m["operationId"] for p in spec["paths"].values() for m in p.values()}
-    assert ops == {"createBatch", "getBatch", "listJobs", "editorLaunch", "transitionJob", "startPrelabelRun",
+    assert ops == {"getJobReview", "getDatasetVersion", "startRevisionBatch", "createBatch", "getBatch", "listJobs", "editorLaunch", "transitionJob", "startPrelabelRun",
                    "startSendOff", "getOperation", "cvatWebhook"}
     for path, item in spec["paths"].items():
         for method, op in item.items():

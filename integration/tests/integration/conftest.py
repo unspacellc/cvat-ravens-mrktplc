@@ -95,7 +95,9 @@ def clips():
 
 def build_ctx(cvat_token, media: dict) -> Ctx:
     settings = Settings(cvat_service_token=cvat_token, webhook_master_secret="test-master-secret")
-    return Ctx(settings=settings, cvat=CvatClient(CVAT_URL, cvat_token), media=fx.FixtureMedia(media), clips=fx.LocalClipSource(FIXTURES))
+    import tempfile
+    return Ctx(settings=settings, cvat=CvatClient(CVAT_URL, cvat_token), media=fx.FixtureMedia(media), clips=fx.LocalClipSource(FIXTURES),
+               store=fx.LocalObjectStore(tempfile.mkdtemp(prefix="lb-store-")), publisher=fx.FixturePublisher())
 
 
 @pytest.fixture

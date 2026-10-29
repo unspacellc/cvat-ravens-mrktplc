@@ -1,7 +1,9 @@
 import { useQuery } from "@tanstack/react-query";
+import { useState } from "react";
 
 import { useLabeling } from "./api";
 import { dueLabel, JobTitle } from "./JobRow";
+import { ReviewDialog } from "./ReviewDialog";
 import { Async, Empty } from "./states";
 import { StatusBadge, SyncAge } from "./status";
 import { launchMessage, useEditorLaunch } from "./useEditorLaunch";
@@ -11,6 +13,7 @@ export function MyJobs() {
   const { api } = useLabeling();
   const query = useQuery({ queryKey: ["labeling", "my-jobs"], queryFn: () => api.jobs({ assignee: "me" }, 0, 100), refetchInterval: 60_000 });
   const launch = useEditorLaunch();
+  const [reviewing, setReviewing] = useState<string | null>(null);
 
   return (
     <section aria-labelledby="my-jobs-h">
@@ -37,6 +40,18 @@ export function MyJobs() {
                   <span className="text-sm text-muted-foreground">{dueLabel(j.due_date)}</span>
                   <StatusBadge state={j.portal_state} />
                   <SyncAge seconds={j.sync_age_s} />
+                  {["created", "annotating", "rework", "in_review"].includes(j.portal_state) ? (
+                    <>
+                      <button
+                        className="rounded-md border border-border px-3 py-1.5 text-sm"
+                        onClick={() => setReviewing(j.id)}
+                        aria-label={`${j.portal_state === "in_review" ? "Review" : "Submit"} ${j.batch_name} ${j.source_asset_id}`}
+                      >
+                        {j.portal_state === "in_review" ? "Review" : "Submit"}
+                      </button>
+                      {reviewing === j.id ? <ReviewDialog job={j} open onOpenChange={(o) => !o && setReviewing(null)} /> : null}
+                    </>
+                  ) : null}
                   <button
                     className="rounded-md bg-primary px-3 py-1.5 text-sm text-primary-foreground disabled:opacity-60"
                     disabled={launch.isPending && launch.variables === j.id}

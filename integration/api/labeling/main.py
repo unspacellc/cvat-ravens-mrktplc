@@ -10,7 +10,7 @@ from .auth import JwksKeys, JwtConfig, JwtIdentity
 from .config import Settings
 from .cvat_client import CvatClient
 from .db import make_engine, make_session_factory
-from .fixtures import FixtureMedia, LocalClipSource
+from .fixtures import FixtureMedia, FixturePublisher, LocalClipSource, LocalObjectStore
 from .service import Ctx
 
 
@@ -33,7 +33,8 @@ def build_app():
     sf = make_session_factory(make_engine())
     identity = JwtIdentity(JwtConfig(issuer, clients), JwksKeys(jwks_uri), sf)
     ctx = Ctx(settings=settings, cvat=CvatClient(settings.cvat_url, settings.cvat_service_token), media=FixtureMedia({}),
-              clips=LocalClipSource(os.environ.get("LABELING_CLIP_ROOT", "fixtures/generated")))
+              clips=LocalClipSource(os.environ.get("LABELING_CLIP_ROOT", "fixtures/generated")),
+              store=LocalObjectStore(os.environ.get("LABELING_STORE_ROOT", "var/objects")), publisher=FixturePublisher())
     return create_app(settings, sf, identity=identity, ctx=ctx)
 
 
