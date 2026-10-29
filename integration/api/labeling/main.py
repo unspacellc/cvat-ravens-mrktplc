@@ -14,11 +14,22 @@ from .fixtures import FixtureMedia, LocalClipSource
 from .service import Ctx
 
 
+def _issuer_and_jwks() -> tuple[str, str]:
+    """Cognito (production): LABELING_COGNITO_REGION + LABELING_COGNITO_USER_POOL_ID; the JWKS URL is deterministic,
+    so startup needs no network call. Any other OIDC issuer (dev mock IdP): LABELING_JWT_ISSUER (+ optional JWKS URI)."""
+    pool = os.environ.get("LABELING_COGNITO_USER_POOL_ID")
+    if pool:
+        issuer = JwtConfig.cognito_issuer(os.environ["LABELING_COGNITO_REGION"], pool)
+        return issuer, f"{issuer}/.well-known/jwks.json"
+    issuer = os.environ["LABELING_JWT_ISSUER"]
+    return issuer, os.environ.get("LABELING_JWKS_URI") or httpx.get(
+        f"{issuer}/.well-known/openid-configuration", timeout=10).json()["jwks_uri"]
+
+
 def build_app():
     settings = Settings()
-    issuer = os.environ["LABELING_JWT_ISSUER"]
+    issuer, jwks_uri = _issuer_and_jwks()
     clients = tuple(c for c in os.environ.get("LABELING_JWT_CLIENT_IDS", "portal-web").split(",") if c)
-    jwks_uri = os.environ.get("LABELING_JWKS_URI") or httpx.get(f"{issuer}/.well-known/openid-configuration", timeout=10).json()["jwks_uri"]
     sf = make_session_factory(make_engine())
     identity = JwtIdentity(JwtConfig(issuer, clients), JwksKeys(jwks_uri), sf)
     ctx = Ctx(settings=settings, cvat=CvatClient(settings.cvat_url, settings.cvat_service_token), media=FixtureMedia({}),

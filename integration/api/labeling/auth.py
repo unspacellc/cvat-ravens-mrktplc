@@ -40,6 +40,10 @@ class JwtConfig:
     client_ids: tuple[str, ...]  # accepted app clients (Cognito access tokens carry `client_id`; ID tokens carry `aud`)
     leeway_s: int = 0
 
+    @staticmethod
+    def cognito_issuer(region: str, user_pool_id: str) -> str:
+        return f"https://cognito-idp.{region}.amazonaws.com/{user_pool_id}"
+
 
 class JwtIdentity:
     def __init__(self, config: JwtConfig, keys: KeyResolver, session_factory: sessionmaker[Session]):

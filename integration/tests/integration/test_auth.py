@@ -95,3 +95,17 @@ def test_tenant_switching_requires_membership(ident, signing, session_factory, m
     assert ident.resolve(tok, t1).roles == frozenset({"labeler"})
     with pytest.raises(PermissionError):
         ident.resolve(tok, "not-a-tenant-of-mine")
+
+
+def test_cognito_shaped_access_token_accepted(session_factory, signing, member):
+    """Cognito access tokens: iss=cognito-idp URL, token_use=access, client_id, no aud, no tenant/role claims."""
+    sub, t1, _ = member
+    issuer = JwtConfig.cognito_issuer("us-east-1", "us-east-1_AbC123")
+    assert issuer == "https://cognito-idp.us-east-1.amazonaws.com/us-east-1_AbC123"
+    ident = JwtIdentity(JwtConfig(issuer, (CLIENT,)), Keys(signing), session_factory)
+    claims = {"sub": sub, "iss": issuer, "client_id": CLIENT, "token_use": "access", "scope": "openid",
+              "username": sub, "exp": int(time.time()) + 300}
+    p = ident.resolve(jwt.encode(claims, signing, algorithm="RS256", headers={"kid": "k"}))
+    assert (p.user_id, p.tenant_id) == (sub, t1)
+    with pytest.raises(PermissionError):  # a Cognito ID token (token_use=id, aud=client) is not an API credential
+        ident.resolve(jwt.encode({**claims, "token_use": "id", "aud": CLIENT}, signing, algorithm="RS256"))
