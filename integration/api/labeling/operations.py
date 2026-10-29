@@ -90,6 +90,14 @@ def retry(op: Operation) -> None:
     op.state, op.attempts, op.run_after, op.error = "queued", 0, now(), None
 
 
+class Pending(Exception):
+    """Not a failure: the operation is waiting on an external system. Re-queue after `wait_s` without consuming an attempt."""
+
+    def __init__(self, wait_s: float = 2.0, note: str = ""):
+        super().__init__(note)
+        self.wait_s = wait_s
+
+
 Handler = Callable[[Operation], None]
 
 
@@ -107,6 +115,10 @@ def run_one(session_factory, handlers: dict[str, Callable], *, lease_s: int = 30
             handlers[op.kind](s, op)
             if op.state == "running":
                 succeed(op)
+        except Pending as p:
+            s.rollback()
+            op = s.get(Operation, op_id)
+            op.state, op.attempts, op.lease_until, op.run_after = "queued", max(0, op.attempts - 1), None, now() + timedelta(seconds=p.wait_s)
         except Exception as e:  # noqa: BLE001 - classify and persist, never lose the failure
             s.rollback()
             op = s.get(Operation, op_id)

@@ -2,6 +2,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useRef } from "react";
 
 import { ApiError, useLabeling } from "./api";
+import { PrelabelPanel } from "./PrelabelPanel";
 import { Async, Empty } from "./states";
 import { StatusBadge } from "./status";
 
@@ -36,6 +37,7 @@ export function BatchDetail({ batchId, roles = [] }: { batchId: string; roles?: 
               Preparing tasks in the editor ({b.operation.state})…
             </p>
           ) : null}
+          {roles.some((r) => r === "admin" || r === "creator") ? <PrelabelPanel batch={b} /> : null}
           {roles.includes("admin") ? (
             <div className="mt-4 rounded-md border border-border p-3">
               <h2 className="font-medium">Dataset delivery</h2>

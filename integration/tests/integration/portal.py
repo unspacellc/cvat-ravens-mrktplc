@@ -10,7 +10,7 @@ import jwt
 from cryptography.hazmat.primitives.asymmetric import rsa
 from fastapi.testclient import TestClient
 
-from api.labeling import operations, provisioning, sendoff, service
+from api.labeling import operations, prelabel, provisioning, sendoff, service
 from api.labeling.app import create_app
 from api.labeling.auth import JwtConfig, JwtIdentity
 from api.labeling.models import LabelingMember
@@ -39,7 +39,7 @@ class Portal:
         return jwt.encode(claims, self.key, algorithm="RS256", headers={"kid": "k1"})
 
     def call(self, method: str, path: str, sub: str | None, tenant: str | None = None, **kw):
-        headers = kw.pop("headers", {})
+        headers = dict(kw.pop("headers", {}))  # never mutate the caller's dict
         if sub is not None:
             headers["Authorization"] = f"Bearer {self.token(sub)}"
         if tenant:
@@ -52,7 +52,8 @@ class Portal:
             s.commit()
 
     def run_operations(self, op_id):
-        h = {"provision_batch": provisioning.provision_batch(self.ctx), "send_off": sendoff.send_off(self.ctx)}
+        h = {"provision_batch": provisioning.provision_batch(self.ctx), "send_off": sendoff.send_off(self.ctx),
+             "prelabel_run": prelabel.prelabel_run(self.ctx)}
         while operations.run_one(self.session_factory, h, op_id=uuid.UUID(str(op_id))):
             pass
 

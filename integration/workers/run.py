@@ -7,7 +7,7 @@ import os
 import signal
 import time
 
-from api.labeling import operations, provisioning, reconcile, sendoff, webhooks
+from api.labeling import operations, prelabel, provisioning, reconcile, sendoff, webhooks
 from api.labeling.config import Settings
 from api.labeling.cvat_client import CvatClient
 from api.labeling.db import make_engine, make_session_factory
@@ -27,7 +27,8 @@ def build_ctx(settings: Settings, clip_root: str) -> Ctx:
 def tick(session_factory, ctx: Ctx, last_reconcile: float) -> float:
     """One pass: run queued operations, drain the webhook inbox, reconcile if the interval elapsed. Returns the
     timestamp of the last reconcile."""
-    handlers = {"provision_batch": provisioning.provision_batch(ctx), "send_off": sendoff.send_off(ctx)}
+    handlers = {"provision_batch": provisioning.provision_batch(ctx), "send_off": sendoff.send_off(ctx),
+                "prelabel_run": prelabel.prelabel_run(ctx)}
     while operations.run_one(session_factory, handlers):
         pass
     while webhooks.process_inbox(session_factory, ctx):

@@ -1,6 +1,6 @@
 import { createContext, useContext, useMemo, type ReactNode } from "react";
 
-import type { BatchDetailData, BatchSummary, JobsPage, Me, Member, ReviewData, Reviewer, TransitionBody } from "./types";
+import type { BatchDetailData, BatchSummary, JobsPage, Me, Member, ModelOption, ReviewData, Reviewer, TransitionBody } from "./types";
 
 export class ApiError extends Error {
   constructor(
@@ -67,6 +67,11 @@ export function createApi(base = "/bff/labeling", doFetch: typeof fetch = (...a)
       call<{ dataset_version_id: string; operation_id: string }>(`/batches/${batchId}/send-offs`, { method: "POST", headers: { "idempotency-key": key } }),
     revisionBatch: (versionId: string, key: string) =>
       call<{ batch_id: string; operation_id: string }>(`/dataset-versions/${versionId}/revision-batches`, { method: "POST", headers: { "idempotency-key": key } }),
+    models: () => call<{ items: ModelOption[] }>("/models"),
+    startPrelabel: (batchId: string, modelId: string, key: string) =>
+      call<{ run_id: string }>(`/batches/${batchId}/prelabel-runs`, { method: "POST", headers: { "idempotency-key": key }, body: JSON.stringify({ model_id: modelId }) }),
+    prelabelCommand: (runId: string, command: "cancel" | "retry" | "manual-fallback") =>
+      call<{ id: string; status: string }>(`/prelabel-runs/${runId}/${command}`, { method: "POST" }),
     launch: (jobId: string) => call<{ url: string }>(`/jobs/${jobId}/editor-launch`, { method: "POST" }),
   };
 }

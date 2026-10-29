@@ -36,6 +36,9 @@ class MediaCatalog(Protocol):
 
 @runtime_checkable
 class ModelCatalog(Protocol):
+    def list_models(self, tenant_id: str) -> list[dict]:
+        """Descriptors the tenant may use (each has `model_id` and `provider`: sagemaker_async | bedrock_nova | rekognition)."""
+
     def entitled(self, tenant_id: str, model_id: str) -> bool: ...
 
     def resolve(self, tenant_id: str, model_id: str) -> dict:

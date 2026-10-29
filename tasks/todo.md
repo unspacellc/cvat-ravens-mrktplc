@@ -105,3 +105,15 @@ reviewer is the CVAT assignee while in review (labeler loses write access); appr
 
 ## Phase 3 review (2026-10-28)
 Review/snapshots/send-off/revision batches built; gate met on fixtures (see integration/docs/phases/phase-3.md). 102+ backend tests, 28 web tests pass.
+
+# Phase 4 plan — AWS batch pre-labeling (2026-10-28)
+Assumptions: no AWS account available -> real-endpoint adapter (SageMaker async via boto3) is built and unit-tested against botocore Stubber only; real AWS evidence/cost = UNMET gate, recorded honestly. Nova/Rekognition: `provider` field + backend interface; not implemented.
+1. transforms.py (letterbox/stretch forward+inverse) + inference.py (backend protocol, deterministic pixel-detecting fake, SageMaker async adapter) -> unit tests.
+2. Models + migration 0005 (prelabel_run, prelabel_batch, prelabel_import ledger).
+3. prelabel.py: eligibility, frame prep, bounded submit, collect, validate, import-once ledger, cancel, retry, manual fallback; operations `Pending` (re-queue without burning attempts) -> real-CVAT tests with pixel-true fixture (letterbox, offset, VFR, stride, empty frames, unknown labels).
+4. Annotator-access gate while a run is active (assign/launch refuse).
+5. metrics.py correction metrics (method versioned, limitations) + routes + web minimal.
+6. ADR 0008, phase-4.md, commit/push.
+
+## Phase 4 review (2026-10-28)
+Offline gate met; real-AWS gate open (no AWS access). See integration/docs/phases/phase-4.md and ADR 0008.

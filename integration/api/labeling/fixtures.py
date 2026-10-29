@@ -36,6 +36,9 @@ class FixtureModels:
     def __init__(self, entitlements: dict[str, dict[str, dict]]):
         self._e = entitlements
 
+    def list_models(self, tenant_id: str) -> list[dict]:
+        return [{**v, "model_id": k} for k, v in self._e.get(tenant_id, {}).items()]
+
     def entitled(self, tenant_id: str, model_id: str) -> bool:
         return model_id in self._e.get(tenant_id, {})
 

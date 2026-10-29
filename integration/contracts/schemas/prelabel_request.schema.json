@@ -1,0 +1,28 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "prelabel_request.schema.json",
+  "title": "Pre-label inference request (one S3 object per SageMaker async invocation)",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema", "run_id", "seq", "frames"],
+  "properties": {
+    "schema": {"const": 1},
+    "run_id": {"type": "string", "format": "uuid"},
+    "seq": {"type": "integer", "minimum": 0},
+    "frames": {
+      "type": "array", "minItems": 1,
+      "items": {
+        "type": "object", "additionalProperties": false,
+        "required": ["frame_id", "source_time_s", "sha256", "width", "height", "image_png_b64"],
+        "properties": {
+          "frame_id": {"type": "string", "description": "<labeling task id>:<CVAT frame index>; echo it back unchanged"},
+          "source_time_s": {"type": "number", "description": "clip_start_offset_s + presentation time; informational for the model"},
+          "sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$", "description": "of the PNG bytes after preprocessing"},
+          "width": {"type": "integer", "minimum": 1},
+          "height": {"type": "integer", "minimum": 1},
+          "image_png_b64": {"type": "string"}
+        }
+      }
+    }
+  }
+}

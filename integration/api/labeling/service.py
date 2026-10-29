@@ -11,7 +11,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from . import operations
-from .adapters import ClipSource, DatasetPublisher, MediaCatalog, ObjectStore
+from .adapters import ClipSource, DatasetPublisher, MediaCatalog, ModelCatalog, ObjectStore
 from .config import Settings, cvat_role_for, cvat_username_for
 from .cvat_client import CvatClient
 from .models import (
@@ -36,6 +36,8 @@ class Ctx:
     clips: ClipSource
     store: ObjectStore | None = None  # snapshots/exports/manifests (Phase 3)
     publisher: DatasetPublisher | None = None
+    models: ModelCatalog | None = None  # Phase 4
+    inference: object | None = None  # InferenceBackend (Phase 4)
 
 
 class NotFound(Exception):
@@ -149,6 +151,9 @@ def assign_job(session: Session, ctx: Ctx, *, tenant_id: str, job_id: uuid.UUID,
         raise NotFound("job not found for tenant")
     if expected_revision is not None and job.revision != expected_revision:
         raise Conflict(f"job revision is {job.revision}, expected {expected_revision}")
+    from .prelabel import gate  # local import: prelabel depends on this module
+
+    gate(session, tenant_id, session.get(LabelingTask, job.task_id).batch_id)
     org = session.get(TenantCvatOrg, (tenant_id, job.cvat_instance))
     ident = _ensure_identity(session, ctx, org, tenant_id, user_id, username, email, uid, role)
     remote = ctx.cvat.set_job_assignee(org.cvat_org_slug, job.cvat_job_id, ident.cvat_user_id)

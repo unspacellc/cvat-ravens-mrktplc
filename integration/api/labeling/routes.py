@@ -13,7 +13,7 @@ from pydantic import BaseModel, Field
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session, sessionmaker
 
-from . import operations, review, sendoff, service
+from . import metrics, operations, prelabel, review, sendoff, service
 from .adapters import IdentityContext, Principal
 from .config import Settings
 from .models import (
@@ -24,6 +24,7 @@ from .models import (
     LabelingMember,
     LabelingTask,
     Operation,
+    PrelabelRun,
     ReviewEvent,
     ReviewIssue,
     TenantCvatOrg,
@@ -77,6 +78,14 @@ class TransitionBody(BaseModel):
     expected_snapshot_sha256: str | None = Field(default=None, pattern="^[0-9a-f]{64}$")
     resolved_issue_ids: list[uuid.UUID] = []
     override: bool = False
+
+
+class PrelabelBody(BaseModel):
+    model_id: str = Field(min_length=1, max_length=128)
+    frames_per_request: int | None = Field(default=None, ge=1, le=64)
+    frame_stride: int | None = Field(default=None, ge=1, le=300)
+    confidence_threshold: float | None = Field(default=None, ge=0, le=1)
+    max_inflight: int | None = Field(default=None, ge=1, le=16)
 
 
 class MemberBody(BaseModel):
@@ -199,7 +208,10 @@ def build_router(deps: Deps) -> APIRouter:
             .where(LabelingJob.tenant_id == p.tenant_id, LabelingTask.batch_id == b.id).group_by(LabelingJob.portal_state)).all())
         op = s.scalar(select(Operation).where(Operation.tenant_id == p.tenant_id, Operation.subject_id == b.id).order_by(Operation.created_at.desc()))
         dv = s.scalar(select(DatasetVersion).where(DatasetVersion.tenant_id == p.tenant_id, DatasetVersion.batch_id == b.id))
-        return {"id": str(b.id), "name": b.name, "lifecycle": b.lifecycle, "revision": b.revision, "job_counts": counts,
+        pr = s.scalar(select(PrelabelRun).where(PrelabelRun.tenant_id == p.tenant_id, PrelabelRun.batch_id == b.id).order_by(PrelabelRun.created_at.desc()))
+        return {"prelabel": None if pr is None else {"id": str(pr.id), "status": pr.status, "model_id": pr.model_id, "error": pr.error,
+                                                     "zero_detection": pr.summary.get("zero_detection"), "detections_imported": pr.summary.get("detections_imported")},
+                "id": str(b.id), "name": b.name, "lifecycle": b.lifecycle, "revision": b.revision, "job_counts": counts,
                 "dataset_version": None if dv is None else {"id": str(dv.id), "status": dv.status},
                 "predecessor_version_id": str(b.predecessor_version_id) if b.predecessor_version_id else None,
                 "tasks": [{"id": str(t.id), "source_asset_id": t.source_asset_id, "status": t.status} for t in tasks],
@@ -239,15 +251,20 @@ def build_router(deps: Deps) -> APIRouter:
                                      username=service.cvat_username_for(member.user_id), email=member.email or "", uid=member.user_id,
                                      role=service.cvat_role_for(member.roles), expected_revision=body.expected_revision)
         except service.Conflict as e:
-            raise ApiError(409, "revision_conflict", str(e)) from None
+            s.rollback()
+            raise ApiError(409, "prelabel_in_progress" if "pre-labeling" in str(e) else "revision_conflict", str(e)) from None
         s.commit()
         return {"id": str(job.id), "assignee_user_id": job.assignee_user_id, "revision": job.revision}
 
     @r.post("/jobs/{job_id}/editor-launch")
     def editor_launch(job_id: uuid.UUID, p: P, s: S):
         need(p, "labeler", "reviewer", "admin")
-        job, task, _ = scoped_job(s, p, job_id)
+        job, task, batch = scoped_job(s, p, job_id)
         member = s.get(LabelingMember, (p.tenant_id, p.user_id))
+        try:
+            prelabel.gate(s, p.tenant_id, batch.id)
+        except service.Conflict as e:
+            raise ApiError(409, "prelabel_in_progress", str(e)) from None
         try:
             ident = service.ensure_member_identity(s, deps.ctx, member)
         except service.NotFound as e:
@@ -345,6 +362,73 @@ def build_router(deps: Deps) -> APIRouter:
         except service.NotFound as e:
             raise ApiError(404, "not_found", str(e)) from None
         return {"batch_id": str(batch.id), "operation_id": str(op.id)}
+
+    def run_view(run: PrelabelRun) -> dict:
+        return {"id": str(run.id), "batch_id": str(run.batch_id), "model_id": run.model_id, "status": run.status,
+                "model": run.model_descriptor.get("artifact"), "summary": run.summary, "error": run.error,
+                "created_at": run.created_at.isoformat(), "operation_id": str(run.operation_id) if run.operation_id else None}
+
+    def run_call(fn, *a, **kw):
+        try:
+            return fn(*a, **kw)
+        except service.NotFound as e:
+            raise ApiError(404, "not_found", str(e)) from None
+        except service.Forbidden as e:
+            raise ApiError(403, "model_not_entitled", str(e)) from None
+        except service.Invalid as e:
+            raise ApiError(422, "invalid_request", str(e)) from None
+        except service.Conflict as e:
+            raise ApiError(409, "conflict", str(e)) from None
+        except operations.IdempotencyConflict as e:
+            raise ApiError(409, "idempotency_conflict", str(e)) from None
+
+    @r.post("/batches/{batch_id}/prelabel-runs", status_code=202)
+    def start_prelabel(batch_id: uuid.UUID, body: PrelabelBody, p: P, s: S, idempotency_key: Annotated[str | None, Header()] = None):
+        need(p, "creator", "admin")
+        if not idempotency_key:
+            raise ApiError(400, "idempotency_key_required", "Idempotency-Key header is required")
+        cfg = body.model_dump(exclude={"model_id"}, exclude_none=True)
+        try:
+            run, op = run_call(prelabel.create_run, s, deps.ctx, tenant_id=p.tenant_id, batch_id=batch_id, model_id=body.model_id,
+                               created_by=p.user_id, idempotency_key=idempotency_key, settings=cfg)
+            s.commit()
+        except ApiError:
+            s.rollback()
+            raise
+        return {"run_id": str(run.id), "operation_id": str(op.id)}
+
+    @r.get("/models")
+    def list_models(p: P):
+        need(p, "creator", "admin")
+        if deps.ctx.models is None:
+            return {"items": []}
+        return {"items": [{"model_id": m["model_id"], "provider": m.get("provider"), "version": (m.get("artifact") or {}).get("version"),
+                           "supported": m.get("provider") in prelabel.SUPPORTED_PROVIDERS} for m in deps.ctx.models.list_models(p.tenant_id)]}
+
+    @r.get("/prelabel-runs/{run_id}")
+    def get_prelabel(run_id: uuid.UUID, p: P, s: S):
+        need(p, "reviewer", "admin", "creator")
+        run = s.scalar(select(PrelabelRun).where(PrelabelRun.tenant_id == p.tenant_id, PrelabelRun.id == run_id))
+        if run is None:
+            raise ApiError(404, "not_found", "pre-label run not found")
+        return run_view(run)
+
+    for action, fn in (("cancel", prelabel.cancel_run), ("retry", prelabel.retry_run), ("manual-fallback", prelabel.manual_fallback)):
+        def _cmd(run_id: uuid.UUID, p: P, s: S, fn=fn):
+            need(p, "creator", "admin")
+            try:
+                run = run_call(fn, s, deps.ctx, tenant_id=p.tenant_id, run_id=run_id)
+                s.commit()
+            except ApiError:
+                s.rollback()
+                raise
+            return run_view(run)
+        r.post(f"/prelabel-runs/{{run_id}}/{action}")(_cmd)
+
+    @r.get("/prelabel-runs/{run_id}/metrics")
+    def prelabel_metrics(run_id: uuid.UUID, p: P, s: S):
+        need(p, "reviewer", "admin", "creator")
+        return run_call(metrics.run_metrics, s, deps.ctx, tenant_id=p.tenant_id, run_id=run_id)
 
     @r.get("/reviewers")
     def reviewers(p: P, s: S):

@@ -46,6 +46,7 @@ export interface BatchDetailData {
   tasks: { id: string; source_asset_id: string; status: string }[];
   operation: { id: string; state: string; error: { message?: string } | null } | null;
   dataset_version?: { id: string; status: string } | null;
+  prelabel?: { id: string; status: string; model_id: string; error: string | null; zero_detection: boolean | null; detections_imported: number | null } | null;
   predecessor_version_id?: string | null;
 }
 
@@ -82,4 +83,11 @@ export interface Me {
   tenant_id: string;
   roles: Role[];
   email: string | null;
+}
+
+export interface ModelOption {
+  model_id: string;
+  provider: string | null;
+  version: string | null;
+  supported: boolean;
 }

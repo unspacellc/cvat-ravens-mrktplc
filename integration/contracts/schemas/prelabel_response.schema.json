@@ -1,0 +1,33 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "prelabel_response.schema.json",
+  "title": "Pre-label inference response. Boxes are in MODEL INPUT pixel coordinates; every requested frame must appear (an empty detections list means 'nothing found'; a missing frame is a failure).",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema", "frames"],
+  "properties": {
+    "schema": {"const": 1},
+    "frames": {
+      "type": "array",
+      "items": {
+        "type": "object", "additionalProperties": false,
+        "required": ["frame_id", "detections"],
+        "properties": {
+          "frame_id": {"type": "string"},
+          "detections": {
+            "type": "array",
+            "items": {
+              "type": "object", "additionalProperties": false,
+              "required": ["label", "score", "box"],
+              "properties": {
+                "label": {"type": "string"},
+                "score": {"type": "number", "minimum": 0, "maximum": 1},
+                "box": {"type": "array", "items": {"type": "number"}, "minItems": 4, "maxItems": 4, "description": "x1,y1,x2,y2"}
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+}

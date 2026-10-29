@@ -291,3 +291,63 @@ class DatasetVersion(Base, Stamped):
     published_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     __table_args__ = (UniqueConstraint("tenant_id", "batch_id"), UniqueConstraint("tenant_id", "id"),
                       ForeignKeyConstraint(["tenant_id", "batch_id"], ["labeling_batch.tenant_id", "labeling_batch.id"]))
+
+
+class PrelabelRun(Base, Stamped):
+    """One pre-label run: pinned model identity + settings, and a summary that keeps failure and zero detections apart."""
+
+    __tablename__ = "prelabel_run"
+    id: Mapped[uuid.UUID] = _uuid_pk()
+    tenant_id: Mapped[str] = mapped_column(String(128), nullable=False)
+    batch_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), nullable=False)
+    model_id: Mapped[str] = mapped_column(String(128), nullable=False)
+    model_descriptor: Mapped[dict] = mapped_column(JSONB, nullable=False)  # pinned artifact identity, mapping, preprocessing
+    settings: Mapped[dict] = mapped_column(JSONB, nullable=False)
+    status: Mapped[str] = mapped_column(String(16), nullable=False, default="queued")  # queued|running|succeeded|failed|cancelled|manual_fallback
+    cancel_requested: Mapped[bool] = mapped_column(nullable=False, default=False)
+    operation_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True))
+    created_by: Mapped[str] = mapped_column(String(128), nullable=False)
+    summary: Mapped[dict] = mapped_column(JSONB, nullable=False, default=dict)
+    error: Mapped[str | None] = mapped_column(Text)
+    __table_args__ = (UniqueConstraint("tenant_id", "id"),
+                      ForeignKeyConstraint(["tenant_id", "batch_id"], ["labeling_batch.tenant_id", "labeling_batch.id"]),
+                      Index("ix_prelabel_run_batch", "tenant_id", "batch_id", "status"))
+
+
+class PrelabelChunk(Base, Stamped):
+    """A bounded group of frames sent as one inference request. `inference_id` is deterministic, so re-submission is safe."""
+
+    __tablename__ = "prelabel_chunk"
+    id: Mapped[uuid.UUID] = _uuid_pk()
+    tenant_id: Mapped[str] = mapped_column(String(128), nullable=False)
+    run_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), nullable=False)
+    task_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), nullable=False)
+    seq: Mapped[int] = mapped_column(Integer, nullable=False)
+    frames: Mapped[list] = mapped_column(JSONB, nullable=False)  # CVAT frame indexes
+    status: Mapped[str] = mapped_column(String(12), nullable=False, default="pending")  # pending|submitted|collected|failed
+    attempts: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    inference_id: Mapped[str] = mapped_column(String(64), nullable=False)
+    input_uri: Mapped[str | None] = mapped_column(Text)
+    raw_uri: Mapped[str | None] = mapped_column(Text)
+    normalized_uri: Mapped[str | None] = mapped_column(Text)
+    error: Mapped[str | None] = mapped_column(Text)
+    __table_args__ = (UniqueConstraint("run_id", "task_id", "seq"),
+                      ForeignKeyConstraint(["tenant_id", "run_id"], ["prelabel_run.tenant_id", "prelabel_run.id"]),
+                      Index("ix_prelabel_chunk_status", "run_id", "status"))
+
+
+class PrelabelImport(Base, Stamped):
+    """Import ledger: one row per (run, task). `jobs` maps job id -> sha256 of the job's annotations right after import,
+    which is how a retry tells 'already imported' from 'a human has edited since' without ever overwriting work."""
+
+    __tablename__ = "prelabel_import"
+    tenant_id: Mapped[str] = mapped_column(String(128), primary_key=True)
+    run_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True)
+    task_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True)
+    status: Mapped[str] = mapped_column(String(12), nullable=False, default="pending")  # pending|done|empty|conflict
+    shapes_expected: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    jobs: Mapped[dict] = mapped_column(JSONB, nullable=False, default=dict)
+    baseline_uri: Mapped[str | None] = mapped_column(Text)
+    baseline_sha256: Mapped[str | None] = mapped_column(String(64))
+    error: Mapped[str | None] = mapped_column(Text)
+    __table_args__ = (ForeignKeyConstraint(["tenant_id", "run_id"], ["prelabel_run.tenant_id", "prelabel_run.id"]),)
