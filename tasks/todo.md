@@ -128,7 +128,7 @@ Scope: prove out the concept. Order is by priority; each item is `Step → verif
 - [ ] **Run `docs/runbooks/cognito-setup.md` end to end** against the dev pool → verify: every check in the runbook passes or is recorded as failed.
 
 - [x] **Labeling membership + job flow through the web host — verified 2026-10-30** (`integration/scripts/seed_poc.py`): test user seeded into tenant `f01fd44e-…` (Unspace customer) as admin+labeler; via the dev host: login → `/board` → `/me` (roles admin/creator/labeler/reviewer) → 3 jobs listed → job assigned (revision 2) → shows under assignee=me → editor-launch returns a CVAT OIDC URL → no cookie / after logout = 401. Not yet verified: opening that URL (CVAT's OIDC is still configured for the mock IdP, not the Cognito pool; needs a client secret for an `aldai_users` app client), submit/review/send-off with the real user, `/sessions` store.
-- [ ] **CVAT editor sign-in with Cognito.** Point CVAT's OIDC at `aldai_users` with a dedicated app client (secret) → verify: the launch URL signs the user into CVAT as their linked `lb-u-…` account and opens only their assigned job.
+- [ ] **CVAT editor sign-in with Cognito — prepared 2026-10-30, blocked on creating the app client** (the agent's attempt to create it in the shared pool was denied by the permission check; command is in `docs/runbooks/cognito-setup.md`). Ready: `deploy/docker-compose.cognito.yml`, `WITH_COGNITO=1` in `stack.sh`, `scripts/verify_cvat_signin.py`. Point CVAT's OIDC at `aldai_users` with a dedicated app client (secret) → verify: the launch URL signs the user into CVAT as their linked `lb-u-…` account and opens only their assigned job.
 
 ## NORMAL
 - [ ] Phase 5: batch creation wizard and theme (no external dependencies).

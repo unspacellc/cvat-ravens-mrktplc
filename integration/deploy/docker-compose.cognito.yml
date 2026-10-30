@@ -1,0 +1,8 @@
+# Points CVAT's editor sign-in (the "second prompt") at the Cognito user pool instead of the dev mock IdP.
+# Enabled with WITH_COGNITO=1; values come from deploy/.env (git-ignored). Listed after docker-compose.idp.yml so it wins.
+services:
+  cvat_server:
+    environment:
+      LABELING_OIDC_ISSUER: ${LABELING_OIDC_ISSUER:?set LABELING_OIDC_ISSUER in deploy/.env}
+      LABELING_OIDC_CLIENT_ID: ${LABELING_OIDC_CLIENT_ID:?set LABELING_OIDC_CLIENT_ID in deploy/.env}
+      LABELING_OIDC_CLIENT_SECRET: ${LABELING_OIDC_CLIENT_SECRET:?set LABELING_OIDC_CLIENT_SECRET in deploy/.env}

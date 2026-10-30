@@ -11,6 +11,8 @@ export SMOKESCREEN_OPTS="--allow-address=${WEBHOOK_TARGET_ALLOW_ADDRESS}"
 files=(-f "$src/docker-compose.yml" -f "$here/docker-compose.guard.yml" -f "$here/docker-compose.integration.yml")
 # WITH_IDP=1 adds the dev-only mock OIDC IdP and OIDC env (never in release packaging).
 [ "${WITH_IDP:-0}" = 1 ] && files+=(-f "$here/docker-compose.idp.yml")
+# WITH_COGNITO=1 points CVAT's OIDC at the Cognito pool from deploy/.env (overrides the mock IdP values above).
+[ "${WITH_COGNITO:-0}" = 1 ] && files+=(-f "$here/docker-compose.cognito.yml")
 dc() { docker compose -p "$CVAT_PROJECT" --project-directory "$src" "${files[@]}" "$@"; }
 case "${1:-}" in
   up) dc up -d ;;
