@@ -158,3 +158,8 @@ Web
 8. Theme: marketplace tokens in light + dark (system preference + toggle), visible focus, skip link, Labelspace header, Back to portal link → verify: contrast check of status tokens in both themes; keyboard walk of wizard.
 Flow
 9. One scripted flow on real CVAT: multi-clip batch created via the wizard API → labeler submits → reviewer rejects → rework → approve → admin sends off → published version, with model services disabled (manual-only) → verify: `tests/integration/test_phase5_flow.py` passes; ruff, vitest, typecheck, build clean.
+
+## Phase 5 review (2026-10-30)
+- Steps 1–9 done and verified (see `integration/docs/phases/phase-5.md`). Backend 134 tests, web 96 tests, ruff/typecheck/build clean, browser check on the live stack.
+- Deferred (kept here as backlog): CVAT editor theme patch + Back to portal in CVAT; in-wizard assignment step; notification hooks for batch events; real keyboard/screen-reader pass; reconcile `contracts/openapi.yaml` CreateBatch with the live API.
+- Lesson: a test that "passes" on a state-machine assumption can be wrong; I assumed jobs stay `approved` after send-off, but delivery moves them to `sent_off`. Check the state machine before writing the assertion.

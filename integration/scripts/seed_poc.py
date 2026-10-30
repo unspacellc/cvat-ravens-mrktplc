@@ -38,19 +38,21 @@ def marketplace_identity() -> tuple[str, str, str]:
 def main() -> None:
     tenant, sub, email = marketplace_identity()
     token = httpx.post(f"{CVAT}/api/auth/login", json={"username": "admin", "password": "Adm1n-local-only!"}).json()["key"]
-    clip = FIXTURES / "seed_clip.mp4"
-    FIXTURES.mkdir(parents=True, exist_ok=True)
-    if not clip.exists():
-        subprocess.run(["ffmpeg", "-y", "-loglevel", "error", "-f", "lavfi", "-i", "testsrc2=size=320x240:rate=30:duration=4", "-pix_fmt", "yuv420p", str(clip)], check=True)
-    asset = f"poc-clip-{tenant[:8]}"
+    # Clips live under <clip root>/<tenant id>/, which is also what the portal API's media catalog lists for that tenant.
+    tenant_dir = FIXTURES / tenant
+    tenant_dir.mkdir(parents=True, exist_ok=True)
+    for name, pattern, secs in (("crossing-north", "testsrc2", 4), ("crossing-south", "smptebars", 3), ("yard-entry", "testsrc", 2)):
+        clip = tenant_dir / f"{name}.mp4"
+        if not clip.exists():
+            subprocess.run(["ffmpeg", "-y", "-loglevel", "error", "-f", "lavfi", "-i", f"{pattern}=size=320x240:rate=30:duration={secs}", "-pix_fmt", "yuv420p", str(clip)], check=True)
     ctx = service.Ctx(settings=Settings(cvat_service_token=token, segment_size=40), cvat=CvatClient(CVAT, token),
-                      media=fx.FixtureMedia({(tenant, asset): fx.make_media_ref(clip, asset, root=FIXTURES)}), clips=fx.LocalClipSource(FIXTURES))
+                      media=fx.LocalDirMediaCatalog(FIXTURES), clips=fx.LocalClipSource(FIXTURES))
     sf = make_session_factory(make_engine())
     with sf() as s:
         service.set_member(s, ctx, tenant_id=tenant, user_id=sub, roles=["admin", "labeler"], email=email)
         schema = service.register_schema(s, tenant, "1.0.0", [{"name": "car", "type": "rectangle", "attributes": []}])
-        _, op = service.create_batch(s, ctx, tenant_id=tenant, name="Unspace proof-of-concept footage", asset_ids=[asset],
-                                     schema_version_id=schema.id, idempotency_key=hashlib.sha256(f"poc-{tenant}".encode()).hexdigest()[:16])
+        _, op = service.create_batch(s, ctx, tenant_id=tenant, name="Unspace proof-of-concept footage", asset_ids=["crossing-north"],
+                                     schema_version_id=schema.id, idempotency_key=hashlib.sha256(f"poc-{tenant}-crossing-north".encode()).hexdigest()[:16])
         s.commit()
         while operations.run_one(sf, {"provision_batch": provisioning.provision_batch(ctx)}, op_id=op.id):
             pass

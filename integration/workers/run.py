@@ -11,7 +11,7 @@ from api.labeling import operations, prelabel, provisioning, reconcile, sendoff,
 from api.labeling.config import Settings
 from api.labeling.cvat_client import CvatClient
 from api.labeling.db import make_engine, make_session_factory
-from api.labeling.fixtures import FixtureMedia, FixturePublisher, LocalClipSource, LocalObjectStore
+from api.labeling.fixtures import FixturePublisher, LocalClipSource, LocalDirMediaCatalog, LocalObjectStore
 from api.labeling.service import Ctx
 
 log = logging.getLogger("labeling.worker")
@@ -20,7 +20,7 @@ _stop = False
 
 def build_ctx(settings: Settings, clip_root: str) -> Ctx:
     # Production binds MediaCatalog/ClipSource to the host (S3-backed); the standalone worker uses local fixtures.
-    return Ctx(settings=settings, cvat=CvatClient(settings.cvat_url, settings.cvat_service_token), media=FixtureMedia({}), clips=LocalClipSource(clip_root),
+    return Ctx(settings=settings, cvat=CvatClient(settings.cvat_url, settings.cvat_service_token), media=LocalDirMediaCatalog(clip_root), clips=LocalClipSource(clip_root),
                store=LocalObjectStore(os.environ.get("LABELING_STORE_ROOT", "var/objects")), publisher=FixturePublisher())
 
 
