@@ -1,42 +1,34 @@
 import { env } from "./env.server";
 
-export interface MarketplaceUser {
-  id: string;
-  email: string;
-  first_name?: string | null;
-  last_name?: string | null;
+export interface LoginResult {
+  accessToken: string;
+  expiresAt: number;
+  sessionId: string;
 }
 
-export interface SessionTokens {
-  accessToken: string;
-  refreshToken: string;
-  expiresAt: number;
-}
+export class LoginRejected extends Error {}
+export class MarketplaceUnavailable extends Error {}
 
 const url = (path: string) => `${env.marketplaceApiUrl}/api/v1${path}`;
 
-/** Credential validation: the marketplace API accepts the user's Cognito access token or answers 401. */
-export async function fetchProfile(accessToken: string): Promise<MarketplaceUser | null> {
-  const res = await fetch(url("/auth/me"), { headers: { authorization: `Bearer ${accessToken}` } });
-  if (res.status === 401 || res.status === 403) return null;
-  if (!res.ok) throw new Error(`marketplace /auth/me failed: ${res.status}`);
-  return (await res.json()) as MarketplaceUser;
-}
-
-/** Credential reception: records the Cognito tokens as a marketplace session. */
-export async function createSession(sessionId: string, t: SessionTokens, userId: string): Promise<void> {
-  const res = await fetch(url("/sessions"), {
-    method: "POST",
-    headers: { authorization: `Bearer ${t.accessToken}`, "content-type": "application/json" },
-    body: JSON.stringify({
-      session_id: sessionId,
-      access_token: t.accessToken,
-      refresh_token: t.refreshToken,
-      expires_at: new Date(t.expiresAt * 1000).toISOString(),
-      user_id: userId,
-    }),
-  });
-  if (!res.ok) throw new Error(`marketplace /sessions failed: ${res.status}`);
+/**
+ * Credential validation: the marketplace API checks the password against Cognito and records the session itself
+ * (see its `/auth/login` description), so the host only keeps the access token and the session id.
+ */
+export async function login(email: string, password: string): Promise<LoginResult> {
+  let res: Response;
+  try {
+    res = await fetch(url("/auth/login"), { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ email, password }) });
+  } catch {
+    throw new MarketplaceUnavailable("login request failed");
+  }
+  if (res.status === 400 || res.status === 401 || res.status === 403 || res.status === 404) throw new LoginRejected(String(res.status));
+  if (!res.ok) throw new MarketplaceUnavailable(`login failed: ${res.status}`);
+  const body = (await res.json().catch(() => null)) as { sessionId?: string; tokens?: { accessToken?: string; expiresIn?: number } } | null;
+  const t = body?.tokens;
+  // No tokens means Cognito wants another step (e.g. a new password); that is finished in the marketplace, not here.
+  if (!body?.sessionId || !t?.accessToken || typeof t.expiresIn !== "number") throw new LoginRejected("incomplete");
+  return { accessToken: t.accessToken, expiresAt: Math.floor(Date.now() / 1000) + t.expiresIn, sessionId: body.sessionId };
 }
 
 /** Best effort: a failed delete must not stop the local sign-out. */
