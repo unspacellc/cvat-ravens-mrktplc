@@ -6,6 +6,7 @@ import hashlib
 import json
 import uuid
 from dataclasses import dataclass
+from datetime import datetime
 
 from sqlalchemy import select
 from sqlalchemy.orm import Session
@@ -52,7 +53,22 @@ class Invalid(Exception):
     pass
 
 
+LABEL_TYPES = {"rectangle", "polygon", "polyline", "points", "ellipse", "cuboid", "skeleton", "mask", "tag"}
+
+
+def validate_labels(labels: list[dict]) -> None:
+    if not labels:
+        raise Invalid("a label schema needs at least one label")
+    names = [str(label.get("name", "")).strip() for label in labels]
+    if any(not n for n in names) or len(set(names)) != len(names):
+        raise Invalid("label names must be non-empty and unique")
+    bad = sorted({str(label.get("type")) for label in labels} - LABEL_TYPES)
+    if bad:
+        raise Invalid(f"unsupported label type(s): {bad}")
+
+
 def register_schema(session: Session, tenant_id: str, semver: str, labels: list[dict]) -> LabelSchemaVersion:
+    validate_labels(labels)
     content = {"labels": labels}
     h = hashlib.sha256(json.dumps(content, sort_keys=True).encode()).hexdigest()
     existing = session.scalar(select(LabelSchemaVersion).where(LabelSchemaVersion.tenant_id == tenant_id, LabelSchemaVersion.content_hash == h))
@@ -64,13 +80,23 @@ def register_schema(session: Session, tenant_id: str, semver: str, labels: list[
     return s
 
 
+def instructions_version(text: str | None) -> str | None:
+    """Content hash, so a change to the instructions is a new version and each batch keeps the one it was created with."""
+    return hashlib.sha256(text.strip().encode()).hexdigest()[:12] if text and text.strip() else None
+
+
 def create_batch(session: Session, ctx: Ctx, *, tenant_id: str, name: str, asset_ids: list[str], schema_version_id: uuid.UUID,
-                 idempotency_key: str, segment_size: int | None = None,
+                 idempotency_key: str, segment_size: int | None = None, instructions: str | None = None, priority: int = 0,
+                 due_date: datetime | None = None, review_policy: dict | None = None,
                  predecessor_version_id: uuid.UUID | None = None) -> tuple[LabelingBatch, operations.Operation]:
     """Validate against the caller's tenant only, then persist batch/tasks and enqueue provisioning (202 semantics)."""
     segment_size = segment_size or ctx.settings.segment_size
+    if len(set(asset_ids)) != len(asset_ids):
+        raise Invalid("a clip can only be added to a batch once")
     payload = {"name": name, "assets": asset_ids, "schema": str(schema_version_id), "segment_size": segment_size,
-               "predecessor": str(predecessor_version_id) if predecessor_version_id else None}
+               "predecessor": str(predecessor_version_id) if predecessor_version_id else None,
+               "instructions": instructions_version(instructions), "priority": priority,
+               "due_date": due_date.isoformat() if due_date else None, "review_policy": review_policy or {"mode": "independent_all"}}
     batch_id = uuid.uuid4()
     op, created = operations.enqueue(session, tenant_id=tenant_id, kind="provision_batch", idempotency_key=idempotency_key,
                                      payload=payload, subject_id=batch_id)
@@ -94,7 +120,9 @@ def create_batch(session: Session, ctx: Ctx, *, tenant_id: str, name: str, asset
         session.add(project)
         session.flush()
     batch = LabelingBatch(id=batch_id, tenant_id=tenant_id, project_id=project.id, name=name, media_manifest=refs,
-                          predecessor_version_id=predecessor_version_id)
+                          predecessor_version_id=predecessor_version_id, instructions=(instructions or "").strip() or None,
+                          instructions_version=instructions_version(instructions), priority=priority, due_date=due_date,
+                          review_policy=review_policy or {"mode": "independent_all"})
     session.add(batch)
     session.flush()
     for ref in refs:
@@ -102,6 +130,37 @@ def create_batch(session: Session, ctx: Ctx, *, tenant_id: str, name: str, asset
                                  cvat_instance=ctx.settings.cvat_instance, segment_size=segment_size))
     session.flush()
     return batch, op
+
+
+def media_summary(ref: dict) -> dict:
+    """What the wizard shows for a clip. Frame count is what CVAT will expose (after the frame-map decimation), not a guess."""
+    from .framemap import FrameMap
+
+    return {"source_asset_id": ref["source_asset_id"], "frames": FrameMap.from_json(ref["frame_map"]).cvat_frame_count,
+            "duration_s": round(ref["clip"]["duration_s"], 2), "width": ref["dimensions"]["width"], "height": ref["dimensions"]["height"],
+            "sha256": ref["sha256"], "telemetry": (ref.get("telemetry") or {}).get("status")}
+
+
+def preview_batch(ctx: Ctx, *, tenant_id: str, asset_ids: list[str], segment_size: int | None = None) -> dict:
+    """No side effects. One task per clip; jobs per task = ceil(frames / segment_size), exactly as provisioning will split them."""
+    seg = segment_size or ctx.settings.segment_size
+    clips, warnings, missing = [], [], []
+    for a in asset_ids:
+        try:
+            m = media_summary(ctx.media.get(tenant_id, a))
+        except KeyError:
+            missing.append(a)
+            continue
+        jobs = max(1, -(-m["frames"] // seg))
+        clips.append({**m, "tasks": 1, "jobs": jobs})
+        if m["telemetry"] not in (None, "ok", "present"):
+            warnings.append(f"{a}: telemetry {m['telemetry']}")
+        if jobs > 50:
+            warnings.append(f"{a}: {jobs} jobs; consider a larger segment size")
+    if missing:
+        raise NotFound(f"media asset(s) not found for tenant: {missing}")
+    return {"segment_size": seg, "clips": clips, "totals": {"clips": len(clips), "tasks": len(clips), "jobs": sum(c["jobs"] for c in clips),
+                                                          "frames": sum(c["frames"] for c in clips)}, "warnings": warnings}
 
 
 def create_revision_batch(session: Session, ctx: Ctx, *, tenant_id: str, version_id: uuid.UUID, idempotency_key: str,

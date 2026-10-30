@@ -65,10 +65,13 @@ def test_openapi_is_valid():
     validate_openapi(spec, base_uri=(C / "openapi.yaml").as_uri())
     ops = {m["operationId"] for p in spec["paths"].values() for m in p.values()}
     assert ops == {"getJobReview", "getDatasetVersion", "startRevisionBatch", "createBatch", "getBatch", "listJobs", "editorLaunch", "transitionJob", "startPrelabelRun",
-                   "startSendOff", "getOperation", "cvatWebhook"}
+                   "startSendOff", "getOperation", "cvatWebhook", "listMedia", "listSchemas", "createSchema", "previewBatch",
+                   "retryOperation", "getMetricsOverview"}
     for path, item in spec["paths"].items():
         for method, op in item.items():
-            if path != "/labeling/webhooks/cvat" and method == "post" and path != "/labeling/jobs/{job_id}/editor-launch":
+            naturally_idempotent = {"/labeling/webhooks/cvat", "/labeling/jobs/{job_id}/editor-launch", "/labeling/schemas",
+                                    "/labeling/batches/preview", "/labeling/operations/{operation_id}/retry"}
+            if path not in naturally_idempotent and method == "post":
                 names = [p.get("$ref", "").split("/")[-1] for p in op.get("parameters", [])]
                 assert "IdempotencyKey" in names, f"{method} {path} must require Idempotency-Key"
 

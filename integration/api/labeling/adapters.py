@@ -33,6 +33,9 @@ class MediaCatalog(Protocol):
     def open_url(self, tenant_id: str, source_asset_id: str, ttl_s: int = 900) -> str:
         """Short-lived transport URL. Never persisted, never a stable identifier."""
 
+    def list_assets(self, tenant_id: str) -> list[dict]:
+        """MediaReference-shaped dicts for every clip this tenant may label. Never includes another tenant's media."""
+
 
 @runtime_checkable
 class ModelCatalog(Protocol):

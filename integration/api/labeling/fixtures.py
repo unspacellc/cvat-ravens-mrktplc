@@ -31,6 +31,45 @@ class FixtureMedia:
         self.get(tenant_id, source_asset_id)
         return f"https://fixture.invalid/{tenant_id}/{source_asset_id}?ttl={ttl_s}"
 
+    def list_assets(self, tenant_id: str) -> list[dict]:
+        return [v for (t, _), v in sorted(self._assets.items()) if t == tenant_id]
+
+
+class LocalDirMediaCatalog:
+    """Dev/standalone catalog: clips live under `<root>/<tenant_id>/*.mp4`, so a tenant can only ever see its own directory.
+    References (sha256 + probed frame map) are built once per file version. The marketplace binds its own catalog instead."""
+
+    def __init__(self, root):
+        from pathlib import Path
+
+        self._root = Path(root)
+        self._cache: dict[tuple, dict] = {}
+
+    def _dir(self, tenant_id: str):
+        if not tenant_id or "/" in tenant_id or ".." in tenant_id:
+            raise KeyError(tenant_id)
+        return self._root / tenant_id
+
+    def _ref(self, tenant_id: str, path) -> dict:
+        key = (tenant_id, path.name, path.stat().st_mtime_ns, path.stat().st_size)
+        if key not in self._cache:
+            self._cache[key] = make_media_ref(path, path.stem, root=self._root)
+        return self._cache[key]
+
+    def get(self, tenant_id: str, source_asset_id: str) -> dict:
+        path = self._dir(tenant_id) / f"{source_asset_id}.mp4"
+        if "/" in source_asset_id or not path.is_file():
+            raise KeyError(source_asset_id)
+        return self._ref(tenant_id, path)
+
+    def open_url(self, tenant_id: str, source_asset_id: str, ttl_s: int = 900) -> str:
+        self.get(tenant_id, source_asset_id)
+        return f"https://fixture.invalid/{tenant_id}/{source_asset_id}?ttl={ttl_s}"
+
+    def list_assets(self, tenant_id: str) -> list[dict]:
+        d = self._dir(tenant_id)
+        return [self._ref(tenant_id, p) for p in sorted(d.glob("*.mp4"))] if d.is_dir() else []
+
 
 class FixtureModels:
     def __init__(self, entitlements: dict[str, dict[str, dict]]):

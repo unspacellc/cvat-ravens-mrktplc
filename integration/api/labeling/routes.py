@@ -13,7 +13,7 @@ from pydantic import BaseModel, Field
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session, sessionmaker
 
-from . import metrics, operations, prelabel, review, sendoff, service
+from . import metrics, operations, overview, prelabel, provisioning, review, sendoff, service
 from .adapters import IdentityContext, Principal
 from .config import Settings
 from .models import (
@@ -23,6 +23,7 @@ from .models import (
     LabelingJob,
     LabelingMember,
     LabelingTask,
+    LabelSchemaVersion,
     Operation,
     PrelabelRun,
     ReviewEvent,
@@ -57,8 +58,27 @@ class AssignBody(BaseModel):
 
 class BatchBody(BaseModel):
     name: str = Field(min_length=1, max_length=256)
-    asset_ids: list[str] = Field(min_length=1)
+    asset_ids: list[str] = Field(min_length=1, max_length=200)
     schema_version_id: uuid.UUID
+    segment_size: int | None = Field(default=None, ge=1, le=5000)
+    instructions: str | None = Field(default=None, max_length=20000)
+    priority: int = Field(default=0, ge=0, le=100)
+    due_date: datetime | None = None
+
+
+class PreviewBody(BaseModel):
+    asset_ids: list[str] = Field(min_length=1, max_length=200)
+    segment_size: int | None = Field(default=None, ge=1, le=5000)
+
+
+class LabelBody(BaseModel):
+    name: str = Field(min_length=1, max_length=128)
+    type: str = "rectangle"
+    attributes: list[dict] = Field(default_factory=list, max_length=50)
+
+
+class SchemaBody(BaseModel):
+    labels: list[LabelBody] = Field(min_length=1, max_length=200)
 
 
 class IssueBody(BaseModel):
@@ -193,8 +213,15 @@ def build_router(deps: Deps) -> APIRouter:
     def list_batches(p: P, s: S):
         need(p, "reviewer", "admin", "creator")
         rows = s.scalars(select(LabelingBatch).where(LabelingBatch.tenant_id == p.tenant_id).order_by(LabelingBatch.created_at.desc()).limit(200))
+        rows = list(rows)
+        counts: dict = {}
+        for bid, st, n in s.execute(select(LabelingTask.batch_id, LabelingJob.portal_state, func.count()).join(
+                LabelingJob, (LabelingJob.tenant_id == LabelingTask.tenant_id) & (LabelingJob.task_id == LabelingTask.id))
+                .where(LabelingTask.tenant_id == p.tenant_id).group_by(LabelingTask.batch_id, LabelingJob.portal_state)).all():
+            counts.setdefault(bid, {})[st] = n
         return {"items": [{"id": str(b.id), "name": b.name, "lifecycle": b.lifecycle, "priority": b.priority,
-                           "created_at": b.created_at.isoformat()} for b in rows]}
+                           "due_date": b.due_date.isoformat() if b.due_date else None, "clips": len(b.media_manifest),
+                           "job_counts": counts.get(b.id, {}), "created_at": b.created_at.isoformat()} for b in rows]}
 
     @r.get("/batches/{batch_id}")
     def batch_detail(batch_id: uuid.UUID, p: P, s: S):
@@ -209,7 +236,22 @@ def build_router(deps: Deps) -> APIRouter:
         op = s.scalar(select(Operation).where(Operation.tenant_id == p.tenant_id, Operation.subject_id == b.id).order_by(Operation.created_at.desc()))
         dv = s.scalar(select(DatasetVersion).where(DatasetVersion.tenant_id == p.tenant_id, DatasetVersion.batch_id == b.id))
         pr = s.scalar(select(PrelabelRun).where(PrelabelRun.tenant_id == p.tenant_id, PrelabelRun.batch_id == b.id).order_by(PrelabelRun.created_at.desc()))
-        return {"prelabel": None if pr is None else {"id": str(pr.id), "status": pr.status, "model_id": pr.model_id, "error": pr.error,
+        task_status = {}
+        for t in tasks:
+            task_status[t.status] = task_status.get(t.status, 0) + 1
+        stuck = op is not None and op.state in ("failed", "cancelled")
+        provisioning_view = {
+            "tasks": {"total": len(tasks), **task_status}, "jobs_created": sum(counts.values()),
+            "state": "failed" if stuck else ("retrying" if op is not None and op.state == "retrying" else ("complete" if b.lifecycle != "provisioning" else "in_progress")),
+            "error": None if op is None else op.error,
+            # Completed tasks are skipped on retry, so recovery never duplicates CVAT tasks.
+            "recovery": [{"action": "retry", "operation_id": str(op.id), "label": "Retry provisioning"}] if stuck else [],
+        }
+        return {"settings": {"priority": b.priority, "due_date": b.due_date.isoformat() if b.due_date else None, "instructions": b.instructions,
+                             "instructions_version": b.instructions_version, "review_policy": b.review_policy,
+                             "segment_size": tasks[0].segment_size if tasks else None},
+                "provisioning": provisioning_view,
+                "prelabel": None if pr is None else {"id": str(pr.id), "status": pr.status, "model_id": pr.model_id, "error": pr.error,
                                                      "zero_detection": pr.summary.get("zero_detection"), "detections_imported": pr.summary.get("detections_imported")},
                 "id": str(b.id), "name": b.name, "lifecycle": b.lifecycle, "revision": b.revision, "job_counts": counts,
                 "dataset_version": None if dv is None else {"id": str(dv.id), "status": dv.status},
@@ -224,11 +266,66 @@ def build_router(deps: Deps) -> APIRouter:
             raise ApiError(400, "idempotency_key_required", "Idempotency-Key header is required")
         try:
             batch, op = service.create_batch(s, deps.ctx, tenant_id=p.tenant_id, name=body.name, asset_ids=body.asset_ids,
-                                             schema_version_id=body.schema_version_id, idempotency_key=idempotency_key)
+                                             schema_version_id=body.schema_version_id, idempotency_key=idempotency_key,
+                                             segment_size=body.segment_size, instructions=body.instructions, priority=body.priority,
+                                             due_date=body.due_date)
         except service.NotFound as e:
             raise ApiError(404, "not_found", str(e)) from None
+        except service.Invalid as e:
+            raise ApiError(422, "invalid", str(e)) from None
         s.commit()
         return {"batch_id": str(batch.id), "operation_id": str(op.id)}
+
+    @r.get("/media")
+    def media(p: P):
+        """Clips this tenant may label (the catalog never returns another tenant's media)."""
+        need(p, "creator", "admin")
+        return {"items": [service.media_summary(m) for m in deps.ctx.media.list_assets(p.tenant_id)]}
+
+    @r.get("/schemas")
+    def schemas(p: P, s: S):
+        need(p, "creator", "admin", "reviewer")
+        rows = s.scalars(select(LabelSchemaVersion).where(LabelSchemaVersion.tenant_id == p.tenant_id).order_by(LabelSchemaVersion.created_at.desc()))
+        return {"items": [{"id": str(v.id), "semver": v.semver, "labels": v.content["labels"], "created_at": v.created_at.isoformat()} for v in rows]}
+
+    @r.post("/schemas", status_code=201)
+    def create_schema(body: SchemaBody, p: P, s: S):
+        need(p, "creator", "admin")
+        try:
+            v = service.register_schema(s, p.tenant_id, "1.0.0", [lb.model_dump() for lb in body.labels])
+        except service.Invalid as e:
+            raise ApiError(422, "invalid", str(e)) from None
+        s.commit()
+        return {"id": str(v.id), "semver": v.semver, "labels": v.content["labels"]}
+
+    @r.post("/batches/preview")
+    def preview(body: PreviewBody, p: P):
+        """Task/job split for a candidate batch. No side effects."""
+        need(p, "creator", "admin")
+        try:
+            return service.preview_batch(deps.ctx, tenant_id=p.tenant_id, asset_ids=body.asset_ids, segment_size=body.segment_size)
+        except service.NotFound as e:
+            raise ApiError(404, "not_found", str(e)) from None
+
+    @r.post("/operations/{op_id}/retry", status_code=202)
+    def retry_operation(op_id: uuid.UUID, p: P, s: S):
+        """Recovery action for a failed operation (e.g. partial provisioning). Completed steps are skipped, so no duplicate tasks."""
+        need(p, "creator", "admin")
+        op = s.scalar(select(Operation).where(Operation.tenant_id == p.tenant_id, Operation.id == op_id))
+        if op is None:
+            raise ApiError(404, "not_found", "operation not found")
+        if op.state not in ("failed", "cancelled"):
+            raise ApiError(409, "not_retryable", f"cannot retry operation in state {op.state}")
+        if op.kind == "provision_batch" and op.subject_id is not None:
+            provisioning.cleanup_failed_tasks(s, deps.ctx, op.subject_id)  # half-created CVAT tasks are removed so retry cannot duplicate
+        operations.retry(op)
+        s.commit()
+        return {"operation_id": str(op.id), "state": op.state}
+
+    @r.get("/metrics/overview")
+    def metrics_overview(p: P, s: S, days: int = 14):
+        need(p, "reviewer", "admin", "creator")
+        return overview.overview(s, tenant_id=p.tenant_id, days=max(1, min(days, 90)))
 
     @r.get("/operations/{op_id}")
     def get_operation(op_id: uuid.UUID, p: P, s: S):

@@ -97,7 +97,8 @@ class LabelingBatch(Base, Stamped):
     name: Mapped[str] = mapped_column(String(256), nullable=False)
     media_manifest: Mapped[list] = mapped_column(JSONB, nullable=False)
     review_policy: Mapped[dict] = mapped_column(JSONB, nullable=False, default=lambda: {"mode": "independent_all"})
-    instructions_version: Mapped[str | None] = mapped_column(String(64))
+    instructions_version: Mapped[str | None] = mapped_column(String(64))  # content hash of `instructions`
+    instructions: Mapped[str | None] = mapped_column(Text)
     predecessor_version_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True))  # revision batch: the version it revises
     priority: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     due_date: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))

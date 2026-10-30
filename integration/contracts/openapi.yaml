@@ -95,6 +95,45 @@ paths:
       parameters: [{name: operation_id, in: path, required: true, schema: {type: string, format: uuid}}]
       responses:
         '200': {description: Operation, content: {application/json: {schema: {$ref: '#/components/schemas/Operation'}}}}
+  /labeling/media:
+    get:
+      operationId: listMedia
+      description: Clips the caller's tenant may label (never another tenant's media).
+      responses:
+        '200': {description: Media summaries, content: {application/json: {schema: {type: object}}}}
+        '403': {$ref: '#/components/responses/Error'}
+  /labeling/schemas:
+    get:
+      operationId: listSchemas
+      responses:
+        '200': {description: Label schema versions for the tenant, content: {application/json: {schema: {type: object}}}}
+    post:
+      operationId: createSchema
+      description: Content-hash deduplicated, so a repeat of the same labels returns the same version (naturally idempotent).
+      responses:
+        '201': {description: Created or existing version, content: {application/json: {schema: {type: object}}}}
+        '422': {$ref: '#/components/responses/Error'}
+  /labeling/batches/preview:
+    post:
+      operationId: previewBatch
+      description: Task/job split for a candidate batch. Pure; writes nothing.
+      responses:
+        '200': {description: Split estimate, content: {application/json: {schema: {type: object}}}}
+        '404': {$ref: '#/components/responses/Error'}
+  /labeling/operations/{operation_id}/retry:
+    post:
+      operationId: retryOperation
+      description: Recovery action for a failed operation; only failed/cancelled operations, completed steps are skipped (naturally idempotent).
+      parameters: [{name: operation_id, in: path, required: true, schema: {type: string, format: uuid}}]
+      responses:
+        '202': {description: Re-queued}
+        '409': {$ref: '#/components/responses/Error'}
+  /labeling/metrics/overview:
+    get:
+      operationId: getMetricsOverview
+      description: Throughput, rejection, queue age and pre-label duration. Time-on-task is reported as unavailable (not instrumented).
+      responses:
+        '200': {description: Metrics, content: {application/json: {schema: {type: object}}}}
   /labeling/webhooks/cvat:
     post:
       operationId: cvatWebhook
