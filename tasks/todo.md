@@ -123,19 +123,19 @@ Scope: prove out the concept. Order is by priority; each item is `Step → verif
 
 ## HIGH — needed to prove login and the portal against the real system
 - [ ] **Marketplace access.** Get `MARKETPLACE_API_KEY` (internal service key for `/sessions`) and a test account (email + password) on the dev API → verify: host signs in through `POST /auth/login`, token lands in `/sessions`, `GET /auth/me` works with the stored token.
-- [ ] **Cognito app client id + pool.** Get pool id, region and the app client id(s) behind the marketplace API (planned source: AWS Secrets Manager, dev API Cognito pool). Add the client id to `LABELING_JWT_CLIENT_IDS`; set `LABELING_COGNITO_REGION` / `LABELING_COGNITO_USER_POOL_ID` → verify: a real access token is accepted by the portal API (`api/labeling/auth.py`); an ID token and a token from another client are rejected.
+- [ ] **Cognito app client id + pool.** Get pool id and the app client id(s) behind the marketplace API (source: Secrets Manager `aldai/dev/cognito-isolated`, region us-east-2, AWS profile `specialskillz`). Add the client id to `LABELING_JWT_CLIENT_IDS`; set `LABELING_COGNITO_REGION` / `LABELING_COGNITO_USER_POOL_ID` → verify: a real access token is accepted by the portal API (`api/labeling/auth.py`); an ID token and a token from another client are rejected.
 - [ ] **Confirm unverified API assumptions on first real run.** `/auth/refresh` body casing (`refreshToken` per spec vs `refresh_token` in marketplace web code); `/auth/login` error codes; session id uniqueness per sign-in (sign-out deletes the shared record) → verify: refresh returns new tokens; wrong password gives the generic error; two sign-ins get distinct session ids.
 - [ ] **Run `docs/runbooks/cognito-setup.md` end to end** against the dev pool → verify: every check in the runbook passes or is recorded as failed.
 
 ## NORMAL
 - [ ] Phase 5: batch creation wizard and theme (no external dependencies).
 - [ ] Phase 6: release qualification, scoped to the proof of concept (real login, one batch through review and send-off).
-- [ ] Decide marketplace consumer format: canonical JSON as is, or wire the legacy correction-manifest adapter.
+- [ ] **Output location and format.** The marketplace has no labeling input or output today; labeling is isolated. Goal (owner, 2026-10-30): send-off places curated, labeled data in a standardized location per user organization, using the marketplace's existing data-segregation (siloing) framework. → verify: find how the marketplace segregates per-organization data (bucket/prefix layout, access policy), map the send-off write-once object store to that layout, and show one organization's send-off landing only under its own location. Replaces the earlier "legacy manifest vs canonical JSON" question: nothing in the marketplace consumes either yet.
 - [ ] Production-shaped storage for send-off: S3 with a deny-overwrite policy instead of the local object store.
 - [ ] Admin "reopen" button in the web UI (API exists).
 - [ ] Browser tests (Playwright) for the labeler, reviewer and admin journeys, and the CVAT editor hand-off in a real browser.
 
 ## LOW — deferred, not required for the proof of concept
-- [ ] **AWS batch pre-labeling (Phase 4, real endpoint).** Code, API and UI exist and pass on the offline fake endpoint; the real-AWS gate is open. Deferred items: a real SageMaker endpoint and credentials; cost measurement against real footage; confirm sub-limits (pre-label ≤ $300/month, ≤ $50/batch); Nova and Rekognition adapters; tracks exercised. → verify when picked up: one real batch labels end to end with measured cost, and `docs/phases/phase-4.md` gate is re-run.
+- [ ] **AWS batch pre-labeling (Phase 4, real endpoint).** Cost limits approved by owner (2026-10-30), to apply when this starts: pre-label ≤ $300/month and ≤ $50/batch, within the $4,000/month whole-system cap. Code, API and UI exist and pass on the offline fake endpoint; the real-AWS gate is open. Deferred items: a real SageMaker endpoint and credentials; cost measurement against real footage; Nova and Rekognition adapters; tracks exercised. → verify when picked up: one real batch labels end to end with measured cost, and `docs/phases/phase-4.md` gate is re-run.
 - [ ] Load/race tests for 5 labelers + 4 creators.
 - [ ] Replace the CVAT superuser service token with a narrower credential.
