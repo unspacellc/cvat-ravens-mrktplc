@@ -142,3 +142,19 @@ Scope: prove out the concept. Order is by priority; each item is `Step → verif
 - [ ] **AWS batch pre-labeling (Phase 4, real endpoint).** Cost limits approved by owner (2026-10-30), to apply when this starts: pre-label ≤ $300/month and ≤ $50/batch, within the $4,000/month whole-system cap. Code, API and UI exist and pass on the offline fake endpoint; the real-AWS gate is open. Deferred items: a real SageMaker endpoint and credentials; cost measurement against real footage; Nova and Rekognition adapters; tracks exercised. → verify when picked up: one real batch labels end to end with measured cost, and `docs/phases/phase-4.md` gate is re-run.
 - [ ] Load/race tests for 5 labelers + 4 creators.
 - [ ] Replace the CVAT superuser service token with a narrower credential.
+
+# Phase 5 plan — Creation workflow and theme (2026-10-30)
+Scope trimmed for the proof of concept. Deferred and noted at the end: CVAT editor theme patch, optional email/Slack delivery, in-wizard assignment step (assignment stays on Board / Batch detail).
+
+Backend
+1. Media listing: `MediaCatalog.list_assets`; dev `LocalDirMediaCatalog` (clips under `<clip root>/<tenant>/`); `GET /media` → verify: tenant A never lists tenant B's clips; frames/duration come from the frame map.
+2. Label schemas: `GET /schemas`, `POST /schemas` (labels validated, content-hash dedupe) → verify: duplicate content returns the same version; bad label rejected 422.
+3. Batch settings persisted: instructions (+ content-hash version), priority, due date, segment size, review policy; migration 0006 adds `instructions` text → verify: batch detail returns them; instructions change ⇒ new version hash.
+4. `POST /batches/preview`: per-clip frames, tasks, jobs from segment size, totals, warnings; no side effects → verify: preview job count equals the jobs provisioning really creates.
+5. Provisioning visibility + recovery: batch detail lists per-task status/error and a recovery action; `POST /operations/{id}/retry` (failed + retryable only; creator/admin) → verify: injected ingest failure shows partial state; retry completes without duplicate tasks.
+6. `GET /metrics/overview`: jobs by state, throughput/day, rejection rate, queue age by state, pre-label inference duration + measured correction metrics (existing), time-on-task reported as `unavailable: not instrumented` → verify: numbers match seeded events; unavailable stays labeled.
+Web
+7. Wizard `/batches/new` (Media → Labels → Details → Preview → Create), batches list `/batches`, metrics view, provisioning panel with recovery action, manual-only mode when `/models` is empty → verify: vitest per step incl. keyboard-only path and failure states.
+8. Theme: marketplace tokens in light + dark (system preference + toggle), visible focus, skip link, Labelspace header, Back to portal link → verify: contrast check of status tokens in both themes; keyboard walk of wizard.
+Flow
+9. One scripted flow on real CVAT: multi-clip batch created via the wizard API → labeler submits → reviewer rejects → rework → approve → admin sends off → published version, with model services disabled (manual-only) → verify: `tests/integration/test_phase5_flow.py` passes; ruff, vitest, typecheck, build clean.
