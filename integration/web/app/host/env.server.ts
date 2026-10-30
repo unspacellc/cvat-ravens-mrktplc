@@ -3,6 +3,8 @@ export const env = {
   apiUrl: process.env.LABELING_API_URL ?? "http://localhost:8000",
   /** Marketplace API that signs users in (`/auth/login`) and holds their sessions (`/sessions`). */
   marketplaceApiUrl: process.env.MARKETPLACE_API_URL ?? "https://api.unspace.cassyork.com",
+  /** Internal service key the marketplace API requires (as a Bearer credential) on its `/sessions` store. Server-side secret. */
+  marketplaceApiKey: process.env.MARKETPLACE_API_KEY ?? "",
   sessionSecret: process.env.SESSION_SECRET ?? "dev-only-session-secret",
   secureCookies: process.env.NODE_ENV === "production",
 };

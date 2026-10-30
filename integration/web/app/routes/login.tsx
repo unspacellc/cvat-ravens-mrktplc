@@ -2,6 +2,7 @@ import { Form, redirect, useActionData, useNavigation } from "react-router";
 
 import { login, LoginRejected } from "~/host/marketplace.server";
 import { commitSession, getSession } from "~/host/session.server";
+import { tokenStore } from "~/host/token-store.server";
 
 export const meta = () => [{ title: "Login - R.A.V.E.N.S Marketplace - Labelspace" }];
 
@@ -13,9 +14,8 @@ export async function action({ request }: { request: Request }) {
   try {
     const r = await login(email, password);
     const session = await getSession(request);
-    session.set("accessToken", r.accessToken);
-    session.set("expiresAt", r.expiresAt);
-    session.set("marketplaceSessionId", r.sessionId);
+    await tokenStore.put(r.sessionId, r.tokens, r.userId);
+    session.set("sessionId", r.sessionId);
     session.unset("tenantId");
     return redirect("/", { headers: { "set-cookie": await commitSession(session) } });
   } catch (e) {

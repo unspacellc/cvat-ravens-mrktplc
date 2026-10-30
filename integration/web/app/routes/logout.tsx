@@ -1,12 +1,12 @@
 import { redirect } from "react-router";
 
-import { deleteSession } from "~/host/marketplace.server";
 import { destroySession, getSession } from "~/host/session.server";
+import { tokenStore } from "~/host/token-store.server";
 
 export async function action({ request }: { request: Request }) {
   const session = await getSession(request);
-  const [id, token] = [session.get("marketplaceSessionId"), session.get("accessToken")];
-  if (id && token) await deleteSession(id, token);
+  const id = session.get("sessionId");
+  if (id) await tokenStore.delete(id);
   return redirect("/login", { headers: { "set-cookie": await destroySession(session) } });
 }
 

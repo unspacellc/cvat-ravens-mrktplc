@@ -1,6 +1,8 @@
 import { render, screen } from "@testing-library/react";
 import { createRoutesStub } from "react-router";
 
+import { tokenStore } from "~/host/token-store.server";
+
 import Login, { action } from "./login";
 
 const jsonRes = (body: unknown, status = 200) => new Response(JSON.stringify(body), { status, headers: { "content-type": "application/json" } });
@@ -21,7 +23,7 @@ describe("login page", () => {
 
 describe("login action", () => {
   it("posts credentials to /auth/login and starts the session from the response", async () => {
-    const f = vi.fn(async (..._a: unknown[]) => jsonRes({ sessionId: "s1", tokens: { accessToken: "tok", expiresIn: 3600 } }));
+    const f = vi.fn(async (..._a: unknown[]) => jsonRes({ sessionId: "s1", tokens: { accessToken: "tok", refreshToken: "ref", expiresIn: 3600 } }));
     vi.stubGlobal("fetch", f);
     const res = (await submit({ email: "a@b.c", password: "pw" })) as Response;
     expect(f.mock.calls[0][0]).toMatch(/\/api\/v1\/auth\/login$/);
@@ -29,6 +31,8 @@ describe("login action", () => {
     expect(res.status).toBe(302);
     expect(res.headers.get("location")).toBe("/");
     expect(res.headers.get("set-cookie")).toContain("__labeling_host=");
+    expect(await tokenStore.get("s1")).toMatchObject({ accessToken: "tok", refreshToken: "ref" });
+    expect(decodeURIComponent(res.headers.get("set-cookie")!)).not.toContain("tok");
   });
 
   it.each([401, 400])("shows a generic error and sets no cookie when the API answers %i", async (status) => {
