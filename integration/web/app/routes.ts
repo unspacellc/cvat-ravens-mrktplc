@@ -2,7 +2,7 @@ import { index, layout, route, type RouteConfig } from "@react-router/dev/routes
 
 export default [
   route("login", "routes/login.tsx"),
-  route("auth/callback", "routes/auth.callback.tsx"),
+  route("auth/session", "routes/auth.session.tsx"),
   route("logout", "routes/logout.tsx"),
   route("bff/labeling/*", "routes/bff.labeling.$.tsx"),
   layout("routes/app.tsx", [

@@ -6,8 +6,7 @@ interface Data {
   accessToken: string;
   expiresAt: number;
   tenantId: string;
-  oidcState: string;
-  codeVerifier: string;
+  marketplaceSessionId: string;
 }
 
 const storage = createCookieSessionStorage<Partial<Data>>({
