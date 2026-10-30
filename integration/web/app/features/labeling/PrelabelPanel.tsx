@@ -27,7 +27,7 @@ function outcome(r: NonNullable<BatchDetailData["prelabel"]>): { text: string; t
   }
 }
 
-const TONE = { info: "bg-blue-50 text-blue-950", ok: "bg-green-50 text-green-950", warn: "bg-amber-50 text-amber-950", error: "bg-red-50 text-red-900" };
+const TONE = { info: "bg-info-soft text-info-soft-fg", ok: "bg-ok-soft text-ok-soft-fg", warn: "bg-warn-soft text-warn-soft-fg", error: "bg-danger-soft text-danger-soft-fg" };
 
 export function PrelabelPanel({ batch }: { batch: BatchDetailData }) {
   const { api } = useLabeling();
@@ -89,7 +89,7 @@ export function PrelabelPanel({ batch }: { batch: BatchDetailData }) {
       ) : null}
       {models.status === "success" && usable.length === 0 && canStart ? <p className="mt-2 text-sm">No supported models are available for this tenant.</p> : null}
       {start.isError ? (
-        <p role="alert" className="mt-2 rounded-md bg-red-50 px-3 py-2 text-sm text-red-900">
+        <p role="alert" className="mt-2 rounded-md bg-danger-soft px-3 py-2 text-sm text-danger-soft-fg">
           {(start.error as Error).message}
         </p>
       ) : null}

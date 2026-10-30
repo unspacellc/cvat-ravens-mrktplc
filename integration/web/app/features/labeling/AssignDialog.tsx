@@ -52,7 +52,7 @@ export function AssignDialog({ job, open, onOpenChange }: { job: Job; open: bool
               )
             ) : null}
             {assign.isError ? (
-              <p role="alert" className="mt-3 rounded-md bg-red-50 px-3 py-2 text-sm text-red-900">
+              <p role="alert" className="mt-3 rounded-md bg-danger-soft px-3 py-2 text-sm text-danger-soft-fg">
                 {conflict ? "Someone else just changed this job. The list was refreshed — review it and try again." : (assign.error as Error).message}
               </p>
             ) : null}

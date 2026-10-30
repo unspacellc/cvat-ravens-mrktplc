@@ -1,6 +1,9 @@
 import { createContext, useContext, useMemo, type ReactNode } from "react";
 
-import type { BatchDetailData, BatchSummary, JobsPage, Me, Member, ModelOption, ReviewData, Reviewer, TransitionBody } from "./types";
+import type {
+  BatchDetailData, BatchSummary, JobsPage, LabelDef, MediaItem, Me, Member, ModelOption, NewBatch, Overview, PreviewResult, ReviewData, Reviewer,
+  SchemaVersion, TransitionBody,
+} from "./types";
 
 export class ApiError extends Error {
   constructor(
@@ -72,6 +75,15 @@ export function createApi(base = "/bff/labeling", doFetch: typeof fetch = (...a)
       call<{ run_id: string }>(`/batches/${batchId}/prelabel-runs`, { method: "POST", headers: { "idempotency-key": key }, body: JSON.stringify({ model_id: modelId }) }),
     prelabelCommand: (runId: string, command: "cancel" | "retry" | "manual-fallback") =>
       call<{ id: string; status: string }>(`/prelabel-runs/${runId}/${command}`, { method: "POST" }),
+    media: () => call<{ items: MediaItem[] }>("/media"),
+    schemas: () => call<{ items: SchemaVersion[] }>("/schemas"),
+    createSchema: (labels: LabelDef[]) => call<SchemaVersion>("/schemas", { method: "POST", body: JSON.stringify({ labels }) }),
+    preview: (assetIds: string[], segmentSize?: number) =>
+      call<PreviewResult>("/batches/preview", { method: "POST", body: JSON.stringify({ asset_ids: assetIds, segment_size: segmentSize }) }),
+    createBatch: (b: NewBatch, key: string) =>
+      call<{ batch_id: string; operation_id: string }>("/batches", { method: "POST", headers: { "idempotency-key": key }, body: JSON.stringify(b) }),
+    retryOperation: (operationId: string) => call<{ operation_id: string; state: string }>(`/operations/${operationId}/retry`, { method: "POST" }),
+    overview: (days = 14) => call<Overview>(`/metrics/overview?days=${days}`),
     launch: (jobId: string) => call<{ url: string }>(`/jobs/${jobId}/editor-launch`, { method: "POST" }),
   };
 }

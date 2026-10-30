@@ -5,6 +5,7 @@ import { ApiError, useLabeling } from "./api";
 import { PrelabelPanel } from "./PrelabelPanel";
 import { Async, Empty } from "./states";
 import { StatusBadge } from "./status";
+import type { Provisioning } from "./types";
 
 export function BatchDetail({ batchId, roles = [] }: { batchId: string; roles?: string[] }) {
   const { api } = useLabeling();
@@ -18,6 +19,10 @@ export function BatchDetail({ batchId, roles = [] }: { batchId: string; roles?: 
     mutationFn: (versionId: string) => api.revisionBatch(versionId, crypto.randomUUID()),
     onSettled: () => void qc.invalidateQueries({ queryKey: ["labeling"] }),
   });
+  const retry = useMutation({
+    mutationFn: (operationId: string) => api.retryOperation(operationId),
+    onSettled: () => void qc.invalidateQueries({ queryKey: ["labeling", "batch", batchId] }),
+  });
   const reasons = sendOff.error instanceof ApiError ? ((sendOff.error.details.reasons as string[] | undefined) ?? []) : [];
   const query = useQuery({ queryKey: ["labeling", "batch", batchId], queryFn: () => api.batch(batchId), refetchInterval: 15_000 });
   return (
@@ -28,12 +33,28 @@ export function BatchDetail({ batchId, roles = [] }: { batchId: string; roles?: 
             {b.name}
           </h1>
           <p className="mt-1 text-sm text-muted-foreground">Status: {b.lifecycle}</p>
-          {b.operation?.state === "failed" || b.operation?.error ? (
-            <p role="alert" className="mt-3 rounded-md bg-red-50 px-3 py-2 text-sm text-red-900">
+          {b.settings ? (
+            <dl className="mt-2 flex flex-wrap gap-x-6 gap-y-1 text-sm text-muted-foreground">
+              <div><dt className="inline">Priority </dt><dd className="inline text-foreground">{b.settings.priority}</dd></div>
+              {b.settings.due_date ? <div><dt className="inline">Due </dt><dd className="inline text-foreground">{new Date(b.settings.due_date).toLocaleDateString()}</dd></div> : null}
+              {b.settings.segment_size ? <div><dt className="inline">Frames per job </dt><dd className="inline text-foreground">{b.settings.segment_size}</dd></div> : null}
+              {b.settings.instructions_version ? <div><dt className="inline">Instructions </dt><dd className="inline text-foreground">v{b.settings.instructions_version}</dd></div> : null}
+            </dl>
+          ) : null}
+          {b.settings?.instructions ? (
+            <details className="mt-2 text-sm">
+              <summary className="cursor-pointer">Instructions for labelers</summary>
+              <p className="mt-1 whitespace-pre-wrap">{b.settings.instructions}</p>
+            </details>
+          ) : null}
+          {b.provisioning && roles.some((r) => r === "admin" || r === "creator") ? (
+            <ProvisioningPanel p={b.provisioning} onRetry={(id) => retry.mutate(id)} retrying={retry.isPending} retryFailed={retry.isError} />
+          ) : b.operation?.state === "failed" || b.operation?.error ? (
+            <p role="alert" className="mt-3 rounded-md bg-danger-soft px-3 py-2 text-sm text-danger-soft-fg">
               Provisioning problem: {b.operation.error?.message ?? "see operation log"}
             </p>
           ) : b.operation && b.operation.state !== "succeeded" ? (
-            <p role="status" className="mt-3 rounded-md bg-blue-50 px-3 py-2 text-sm text-blue-950">
+            <p role="status" className="mt-3 rounded-md bg-info-soft px-3 py-2 text-sm text-info-soft-fg">
               Preparing tasks in the editor ({b.operation.state})…
             </p>
           ) : null}
@@ -47,7 +68,7 @@ export function BatchDetail({ batchId, roles = [] }: { batchId: string; roles?: 
                 </p>
               ) : null}
               {sendOff.isError ? (
-                <div role="alert" className="mt-2 rounded-md bg-red-50 px-3 py-2 text-sm text-red-900">
+                <div role="alert" className="mt-2 rounded-md bg-danger-soft px-3 py-2 text-sm text-danger-soft-fg">
                   <p>{(sendOff.error as Error).message}</p>
                   {reasons.length > 0 ? (
                     <ul className="mt-1 list-disc pl-5">
@@ -96,5 +117,35 @@ export function BatchDetail({ batchId, roles = [] }: { batchId: string; roles?: 
         </section>
       )}
     </Async>
+  );
+}
+
+function ProvisioningPanel({ p, onRetry, retrying, retryFailed }: { p: Provisioning; onRetry: (operationId: string) => void; retrying: boolean; retryFailed: boolean }) {
+  const t = p.tasks;
+  const summary = `${t.ready ?? 0} of ${t.total ?? 0} clips ready · ${p.jobs_created} job${p.jobs_created === 1 ? "" : "s"} created`;
+  if (p.state === "complete") return <p className="mt-3 text-sm text-muted-foreground">{summary}.</p>;
+  if (p.state === "failed") {
+    return (
+      <div role="alert" className="mt-3 rounded-md bg-danger-soft px-3 py-2 text-sm text-danger-soft-fg">
+        <p>
+          Provisioning problem: {p.error?.message ?? "see operation log"}
+        </p>
+        <p className="mt-1">
+          {summary}
+          {t.failed ? ` · ${t.failed} failed` : ""}. Clips that finished are kept; retrying only redoes the rest.
+        </p>
+        {p.recovery.map((r) => (
+          <button key={r.operation_id} className="mt-2 rounded-md bg-danger-strong px-3 py-1.5 text-danger-strong-fg disabled:opacity-60" disabled={retrying} onClick={() => onRetry(r.operation_id)}>
+            {retrying ? "Retrying…" : r.label}
+          </button>
+        ))}
+        {retryFailed ? <p className="mt-1">The retry could not be started. Try again.</p> : null}
+      </div>
+    );
+  }
+  return (
+    <p role="status" className="mt-3 rounded-md bg-info-soft px-3 py-2 text-sm text-info-soft-fg">
+      Preparing tasks in the editor ({p.state === "retrying" ? "retrying after a temporary problem" : "in progress"}): {summary}.
+    </p>
   );
 }

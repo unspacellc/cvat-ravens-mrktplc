@@ -8,7 +8,10 @@ export default [
     index("routes/_index.tsx"),
     route("my-jobs", "routes/my-jobs.tsx"),
     route("board", "routes/board.tsx"),
+    route("batches", "routes/batches.tsx"),
+    route("batches/new", "routes/batches.new.tsx"),
     route("batches/:batchId", "routes/batches.$batchId.tsx"),
+    route("metrics", "routes/metrics.tsx"),
     route("select-tenant", "routes/select-tenant.tsx"),
   ]),
 ] satisfies RouteConfig;

@@ -1,12 +1,12 @@
 import { useLabeling } from "./api";
 
 const TONES: Record<string, string> = {
-  created: "bg-slate-200 text-slate-900",
-  annotating: "bg-blue-100 text-blue-950",
-  in_review: "bg-amber-100 text-amber-950",
-  rework: "bg-red-100 text-red-950",
-  approved: "bg-green-100 text-green-950",
-  sent_off: "bg-green-100 text-green-950",
+  created: "bg-neutral-soft text-neutral-soft-fg",
+  annotating: "bg-info-soft text-info-soft-fg",
+  in_review: "bg-warn-soft text-warn-soft-fg",
+  rework: "bg-danger-soft text-danger-soft-fg",
+  approved: "bg-ok-soft text-ok-soft-fg",
+  sent_off: "bg-ok-soft text-ok-soft-fg",
 };
 
 const LABELS: Record<string, string> = {
@@ -38,7 +38,7 @@ export function SyncAge({ seconds }: { seconds: number | null }) {
   const { staleAfterS } = useLabeling();
   const stale = seconds === null || seconds > staleAfterS;
   return (
-    <span className={stale ? "rounded bg-amber-100 px-1.5 py-0.5 text-xs text-amber-950" : "text-xs text-muted-foreground"} data-testid="sync-age">
+    <span className={stale ? "rounded bg-warn-soft px-1.5 py-0.5 text-xs text-warn-soft-fg" : "text-xs text-muted-foreground"} data-testid="sync-age">
       {seconds === null ? "Not synced yet" : `${stale ? "Stale · " : ""}Synced ${formatAge(seconds)}`}
     </span>
   );

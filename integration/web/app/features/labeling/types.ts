@@ -34,7 +34,68 @@ export interface BatchSummary {
   name: string;
   lifecycle: string;
   priority: number;
+  due_date?: string | null;
+  clips?: number;
+  job_counts?: Record<string, number>;
   created_at: string;
+}
+
+export interface MediaItem {
+  source_asset_id: string;
+  frames: number;
+  duration_s: number;
+  width: number;
+  height: number;
+  sha256: string;
+  telemetry: string | null;
+}
+
+export interface LabelDef {
+  name: string;
+  type: string;
+  attributes?: unknown[];
+}
+
+export interface SchemaVersion {
+  id: string;
+  semver: string;
+  labels: LabelDef[];
+}
+
+export interface PreviewResult {
+  segment_size: number;
+  clips: (MediaItem & { tasks: number; jobs: number })[];
+  totals: { clips: number; tasks: number; jobs: number; frames: number };
+  warnings: string[];
+}
+
+export interface NewBatch {
+  name: string;
+  asset_ids: string[];
+  schema_version_id: string;
+  segment_size?: number;
+  instructions?: string;
+  priority?: number;
+  due_date?: string;
+}
+
+export interface Provisioning {
+  state: "in_progress" | "retrying" | "failed" | "complete";
+  tasks: Record<string, number>;
+  jobs_created: number;
+  error: { message?: string } | null;
+  recovery: { action: "retry"; operation_id: string; label: string }[];
+}
+
+export interface Overview {
+  window_days: number;
+  jobs_by_state: Record<string, number>;
+  throughput: { approved_per_day: Record<string, number>; approved_total: number };
+  rejection: { rejected: number; approved: number; rate: number | null };
+  queue_age: Record<string, { jobs: number; oldest_age_s: number }>;
+  prelabel: { runs: number; by_status: Record<string, number>; inference_duration_s: { avg: number; max: number } | null; correction_metrics: string };
+  time_on_task: { available: boolean; reason: string };
+  tasks_by_status: Record<string, number>;
 }
 
 export interface BatchDetailData {
@@ -48,6 +109,8 @@ export interface BatchDetailData {
   dataset_version?: { id: string; status: string } | null;
   prelabel?: { id: string; status: string; model_id: string; error: string | null; zero_detection: boolean | null; detections_imported: number | null } | null;
   predecessor_version_id?: string | null;
+  settings?: { priority: number; due_date: string | null; instructions: string | null; instructions_version: string | null; segment_size: number | null };
+  provisioning?: Provisioning;
 }
 
 export interface ReviewIssue {

@@ -91,7 +91,7 @@ export function ReviewDialog({ job, open, onOpenChange }: { job: Job; open: bool
               {inReview ? (
                 <>
                   {data.live_snapshot_sha256 === null ? (
-                    <p role="alert" className="rounded-md bg-amber-50 px-3 py-2 text-amber-950">
+                    <p role="alert" className="rounded-md bg-warn-soft px-3 py-2 text-warn-soft-fg">
                       Only the assigned reviewer can decide on this job.
                     </p>
                   ) : (
@@ -161,7 +161,7 @@ export function ReviewDialog({ job, open, onOpenChange }: { job: Job; open: bool
           ) : null}
 
           {run.isError ? (
-            <p role="alert" className="mt-3 rounded-md bg-red-50 px-3 py-2 text-sm text-red-900">
+            <p role="alert" className="mt-3 rounded-md bg-danger-soft px-3 py-2 text-sm text-danger-soft-fg">
               {problem(run.error)}
             </p>
           ) : null}

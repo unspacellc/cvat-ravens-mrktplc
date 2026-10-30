@@ -1,14 +1,16 @@
 import { isRouteErrorResponse, Links, Meta, Outlet, Scripts, ScrollRestoration } from "react-router";
 
+import { THEME_SCRIPT } from "./host/ThemeToggle";
 import "./styles/globals.css";
 
 export function Layout({ children }: { children: React.ReactNode }) {
   return (
-    <html lang="en">
+    <html lang="en" suppressHydrationWarning>
       <head>
         <meta charSet="utf-8" />
         <meta name="viewport" content="width=device-width, initial-scale=1" />
-        <title>Labeling</title>
+        <script dangerouslySetInnerHTML={{ __html: THEME_SCRIPT }} />
+        <title>R.A.V.E.N.S Marketplace - Labelspace</title>
         <Meta />
         <Links />
       </head>

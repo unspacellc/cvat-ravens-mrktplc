@@ -21,7 +21,7 @@ export function MyJobs() {
         My jobs
       </h1>
       {launch.isError ? (
-        <p role="alert" className="mb-3 rounded-md bg-red-50 px-3 py-2 text-sm text-red-900">
+        <p role="alert" className="mb-3 rounded-md bg-danger-soft px-3 py-2 text-sm text-danger-soft-fg">
           {launchMessage(launch.error)}
         </p>
       ) : null}

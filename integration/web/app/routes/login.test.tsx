@@ -16,8 +16,8 @@ describe("login page", () => {
     const Stub = createRoutesStub([{ path: "/login", Component: Login }]);
     render(<Stub initialEntries={["/login"]} />);
     expect(screen.getByRole("heading", { level: 1 })).toHaveTextContent("R.A.V.E.N.S Marketplace - Labelspace");
-    expect(screen.getByText("Labelspace")).toHaveClass("text-red-600");
-    expect(screen.getByText("powered by CVAT community")).toHaveClass("text-xs", "text-gray-500");
+    expect(screen.getByText("Labelspace")).toHaveClass("text-brand");
+    expect(screen.getByText("powered by CVAT community")).toHaveClass("text-xs", "text-muted-foreground");
   });
 });
 

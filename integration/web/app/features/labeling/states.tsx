@@ -36,16 +36,16 @@ export function ErrorState({ error, onRetry }: { error: unknown; onRetry?: () =>
   const { loginUrl } = useLabeling();
   const d = describeError(error);
   return (
-    <div role="alert" className="rounded-md border border-red-300 bg-red-50 p-4 text-red-900" data-testid="error">
+    <div role="alert" className="rounded-md border border-danger-border bg-danger-soft p-4 text-danger-soft-fg" data-testid="error">
       <p className="font-medium">{d.message}</p>
       {d.requestId ? <p className="mt-1 text-xs">Reference {d.requestId}</p> : null}
       <div className="mt-3 flex gap-2">
         {d.sessionExpired ? (
-          <a className="rounded-md bg-red-900 px-3 py-1.5 text-sm text-white" href={loginUrl}>
+          <a className="rounded-md bg-danger-strong px-3 py-1.5 text-sm text-danger-strong-fg" href={loginUrl}>
             Sign in again
           </a>
         ) : onRetry ? (
-          <button className="rounded-md border border-red-900 px-3 py-1.5 text-sm" onClick={onRetry}>
+          <button className="rounded-md border border-danger-strong px-3 py-1.5 text-sm" onClick={onRetry}>
             Try again
           </button>
         ) : null}
@@ -58,7 +58,7 @@ export function ErrorState({ error, onRetry }: { error: unknown; onRetry?: () =>
 export function StaleBanner({ error, onRetry }: { error: unknown; onRetry?: () => void }) {
   const d = describeError(error);
   return (
-    <div role="status" className="mb-3 flex items-center justify-between rounded-md bg-amber-100 px-3 py-2 text-sm text-amber-950" data-testid="stale-banner">
+    <div role="status" className="mb-3 flex items-center justify-between rounded-md bg-warn-soft px-3 py-2 text-sm text-warn-soft-fg" data-testid="stale-banner">
       <span>Showing the last data we received. {d.message}</span>
       {onRetry ? (
         <button className="underline" onClick={onRetry}>

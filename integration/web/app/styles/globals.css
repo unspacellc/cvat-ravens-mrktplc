@@ -10,6 +10,21 @@
   --color-muted: var(--muted);
   --color-muted-foreground: var(--muted-foreground);
   --color-border: var(--border);
+  --color-ring: var(--ring);
+  --color-brand: var(--brand);
+  --color-danger-soft: var(--danger-soft);
+  --color-danger-soft-fg: var(--danger-soft-fg);
+  --color-danger-border: var(--danger-border);
+  --color-danger-strong: var(--danger-strong);
+  --color-danger-strong-fg: var(--danger-strong-fg);
+  --color-warn-soft: var(--warn-soft);
+  --color-warn-soft-fg: var(--warn-soft-fg);
+  --color-info-soft: var(--info-soft);
+  --color-info-soft-fg: var(--info-soft-fg);
+  --color-ok-soft: var(--ok-soft);
+  --color-ok-soft-fg: var(--ok-soft-fg);
+  --color-neutral-soft: var(--neutral-soft);
+  --color-neutral-soft-fg: var(--neutral-soft-fg);
 }
 
 :root {
@@ -21,4 +36,53 @@
   --muted: #f5f5f5;
   --muted-foreground: #525252;
   --border: #e4e4e4;
+  --ring: #525252;
+  --brand: #b3001b;
+  --danger-soft: #fdecec;
+  --danger-soft-fg: #7a1212;
+  --danger-border: #f3b4b4;
+  --danger-strong: #9b1c1c;
+  --danger-strong-fg: #ffffff;
+  --warn-soft: #fff4d6;
+  --warn-soft-fg: #5c3d00;
+  --info-soft: #e6f0ff;
+  --info-soft-fg: #0b2e66;
+  --ok-soft: #e3f5e6;
+  --ok-soft-fg: #0d4a1b;
+  --neutral-soft: #e8e8e8;
+  --neutral-soft-fg: #1a1a1a;
 }
+
+/* Same token names as the marketplace's .dark class, so the module restyles with the host. */
+.dark {
+  --background: #000000;
+  --foreground: #ffffff;
+  --card: #090909;
+  --primary: #ffffff;
+  --primary-foreground: #000000;
+  --muted: #1d1d1d;
+  --muted-foreground: #a4a4a4;
+  --border: #242424;
+  --ring: #a4a4a4;
+  --brand: #ff6b6b;
+  --danger-soft: #3a1414;
+  --danger-soft-fg: #ffb4b4;
+  --danger-border: #7a2a2a;
+  --danger-strong: #ff5b5b;
+  --danger-strong-fg: #000000;
+  --warn-soft: #3a2c0a;
+  --warn-soft-fg: #ffd98a;
+  --info-soft: #0f2747;
+  --info-soft-fg: #a9cdff;
+  --ok-soft: #11331a;
+  --ok-soft-fg: #9be3ab;
+  --neutral-soft: #2a2a2a;
+  --neutral-soft-fg: #eaeaea;
+}
+
+:root { color-scheme: light; }
+.dark { color-scheme: dark; }
+
+/* Visible keyboard focus everywhere, in both themes. */
+:focus-visible { outline: 2px solid var(--ring); outline-offset: 2px; }
+

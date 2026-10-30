@@ -73,4 +73,39 @@ describe("BatchDetail", () => {
       expect((calls.find((c) => c.url.endsWith("/revision-batches"))!.init.headers as Record<string, string>)["idempotency-key"]).toBeTruthy();
     });
   });
+
+  describe("provisioning recovery", () => {
+    const prov = (over = {}) => ({
+      state: "failed", tasks: { total: 2, ready: 1, failed: 1 }, jobs_created: 2, error: { message: "clip unreadable" },
+      recovery: [{ action: "retry", operation_id: "o1", label: "Retry provisioning" }], ...over,
+    });
+
+    it("explains partial provisioning and offers Retry, which calls the retry endpoint once", async () => {
+      const user = userEvent.setup();
+      const { calls } = renderWith(<BatchDetail batchId="b1" roles={["admin"]} />, noModels((url, init) =>
+        url.endsWith("/operations/o1/retry") ? json({ operation_id: "o1", state: "queued" }, 202) : json(batch({ provisioning: prov(), operation: { id: "o1", state: "failed", error: { message: "clip unreadable" } } }))));
+      const alert = await screen.findByRole("alert");
+      expect(alert).toHaveTextContent("clip unreadable");
+      expect(alert).toHaveTextContent("1 of 2 clips ready · 2 jobs created · 1 failed");
+      await user.click(screen.getByRole("button", { name: "Retry provisioning" }));
+      await waitFor(() => expect(calls.filter((c) => c.url.endsWith("/operations/o1/retry") && c.init.method === "POST")).toHaveLength(1));
+    });
+
+    it("shows no Retry to a role that cannot recover, and progress while preparing", async () => {
+      renderWith(<BatchDetail batchId="b1" roles={["reviewer"]} />, noModels(() => json(batch({ provisioning: prov(), operation: { id: "o1", state: "failed", error: { message: "clip unreadable" } } }))));
+      expect(await screen.findByRole("alert")).toHaveTextContent("clip unreadable");
+      expect(screen.queryByRole("button", { name: "Retry provisioning" })).toBeNull();
+    });
+
+    it("shows progress while in flight and the saved settings", async () => {
+      renderWith(<BatchDetail batchId="b1" roles={["admin"]} />, noModels(() => json(batch({
+        provisioning: prov({ state: "in_progress", error: null, recovery: [], tasks: { total: 2, ready: 1, ingesting: 1 }, jobs_created: 1 }),
+        settings: { priority: 7, due_date: "2030-01-15T23:59:59Z", instructions: "Box every car.", instructions_version: "abc123", segment_size: 40 },
+      }))));
+      expect(await screen.findByText(/1 of 2 clips ready/)).toHaveTextContent("Preparing tasks in the editor (in progress)");
+      expect(screen.getByText("vabc123")).toBeInTheDocument();
+      expect(screen.getByText("Box every car.")).toBeInTheDocument();
+    });
+  });
 });
+
