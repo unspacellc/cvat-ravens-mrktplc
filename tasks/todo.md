@@ -163,3 +163,20 @@ Flow
 - Steps 1–9 done and verified (see `integration/docs/phases/phase-5.md`). Backend 134 tests, web 96 tests, ruff/typecheck/build clean, browser check on the live stack.
 - Deferred (kept here as backlog): CVAT editor theme patch + Back to portal in CVAT; in-wizard assignment step; notification hooks for batch events; real keyboard/screen-reader pass; reconcile `contracts/openapi.yaml` CreateBatch with the live API.
 - Lesson: a test that "passes" on a state-machine assumption can be wrong; I assumed jobs stay `approved` after send-off, but delivery moves them to `sent_off`. Check the state machine before writing the assertion.
+
+# Phase 6 plan — Release qualification, scoped to the proof of concept (2026-10-30)
+Scope constraints (owner: proof of concept; pre-labeling deferred): no real-AWS items; capacity run is on the local Docker host (not production-representative, recorded as such); pinned-version upgrade rehearsal is documented, not executed.
+1. Qualification matrix: each spec bullet → existing test, new test, or recorded gap → verify: every "covered" row names a test that exists and passes.
+2. Fix found defects: (a) unavailable CVAT gives a bare 500, not the error envelope; (b) webhook secret rotation leaves CVAT signing with the old secret → verify: tests that fail before the fix.
+3. New resilience tests (real CVAT): lease-expiry crash recovery, CVAT outage leaves no partial state and recovers, concurrent approvals produce exactly one approval, webhook secret rotation without a gap → verify: pass, plus run twice for flakiness.
+4. Design-point load run (5 labelers + 4 creators, concurrent): p95 job-list latency, editor-style reads, ingestion, export, container CPU/memory peaks → verify: JSON evidence file; numbers compared with the proposed targets; caveats stated.
+5. Restore drill re-run on the current schema (0006) → verify: evidence file; frames, jobs, snapshots, dataset versions identical after restore.
+6. Operations doc: alerts, retry/dead-letter recovery, capacity limits, retention/deletion, access revocation, rollback, secret rotation → verify: each procedure cites the code/test that backs it.
+7. Gate verdict in `docs/phases/phase-6.md` with open items and owners.
+
+## Phase 6 review (2026-10-30)
+- Steps 1–7 done (`integration/docs/phases/phase-6.md`). Full backend suite 138 passed + 1 skipped (load test needs `LABELING_LOAD=1`); ruff clean.
+- Found and fixed: CVAT outage → bare 500; webhook secret rotation gap; test runs leaving ~970 webhooks that made the CVAT webhook worker retry endlessly and the suite flaky.
+- Evidence: `docs/phases/evidence/load-design-point-2026-10-30.json`, `restore-drill-2026-10-30.json`.
+- Backlog added: production-host load run, narrower CVAT service account, alert delivery, rate limiting, tenant offboarding decision, real CVAT upgrade rehearsal.
+- Lesson: when a test passes alone and fails in the suite, look at accumulated external state before the test code. The count (973 hooks) and the worker log rate found it in two commands.

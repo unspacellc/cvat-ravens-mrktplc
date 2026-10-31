@@ -47,4 +47,5 @@ asyncio_mode = "auto"
 markers = [
     "capability: requires a running pinned CVAT stack",
     "contract: offline schema/contract tests",
+    "load: design-point load run (needs LABELING_LOAD=1 and the running stack); writes evidence JSON",
 ]

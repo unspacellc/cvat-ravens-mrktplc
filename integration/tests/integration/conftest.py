@@ -28,6 +28,44 @@ def alembic_cfg(url: str) -> Config:
     return cfg
 
 
+_WEBHOOKS: set[tuple[str, int]] = set()
+
+
+def _read_webhooks(url: str) -> set[tuple[str, int]]:
+    e = create_engine(url)
+    try:
+        with e.connect() as c:
+            return {(slug, hook) for slug, hook in c.execute(text("select cvat_org_slug, cvat_webhook_id from tenant_cvat_org where cvat_webhook_id is not null"))}
+    except Exception:  # noqa: BLE001  (tables gone mid-roundtrip test)
+        return set()
+    finally:
+        e.dispose()
+
+
+@pytest.fixture(autouse=True)
+def remember_webhooks(request):
+    """Each test tenant gets a CVAT org and webhook. Left behind, CVAT's webhook worker retries their failed deliveries forever
+    (~96k log lines in 3 minutes after ~970 accumulated) and starves later webhook tests. Remember them after every test, because
+    test_migration_roundtrip wipes the shared DB part-way through the session."""
+    yield
+    if "db_url" in request.fixturenames:
+        _WEBHOOKS.update(_read_webhooks(request.getfixturevalue("db_url")))
+
+
+def _delete_test_webhooks(url: str) -> None:
+    """Best effort: never fails teardown, and one slow or missing hook does not stop the rest."""
+    try:
+        key = httpx.post(f"{CVAT_URL}/api/auth/login", json={"username": "admin", "password": "Adm1n-local-only!"}, timeout=10).json()["key"]
+    except Exception:  # noqa: BLE001
+        return
+    for slug, hook in _WEBHOOKS | _read_webhooks(url):
+        try:
+            httpx.delete(f"{CVAT_URL}/api/webhooks/{hook}", headers={"Authorization": f"Token {key}", "X-Organization": slug}, timeout=60)
+        except httpx.HTTPError:
+            pass
+    _WEBHOOKS.clear()
+
+
 @pytest.fixture(scope="session")
 def db_url():
     base = make_url(database_url())
@@ -38,6 +76,7 @@ def db_url():
     url = base.set(database=name).render_as_string(hide_password=False)
     command.upgrade(alembic_cfg(url), "head")
     yield url
+    _delete_test_webhooks(url)
     with admin.connect() as c:
         c.execute(text(f'DROP DATABASE "{name}" WITH (FORCE)'))
     admin.dispose()

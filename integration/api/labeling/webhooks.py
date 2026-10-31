@@ -58,7 +58,7 @@ def receive(session: Session, settings: Settings, raw_body: bytes, signature: st
     except (ValueError, KeyError, TypeError):
         raise BadSignature("malformed payload") from None
     org = session.scalar(select(TenantCvatOrg).where(TenantCvatOrg.cvat_instance == settings.cvat_instance, TenantCvatOrg.cvat_webhook_id == hook_id))
-    if org is None or not verify_signature(settings.tenant_webhook_secret(org.tenant_id), raw_body, signature):
+    if org is None or not any(verify_signature(sec, raw_body, signature) for sec in settings.tenant_webhook_secrets(org.tenant_id)):
         raise BadSignature("signature verification failed")  # same answer for unknown hook and bad signature
     if payload.get("event") == "ping":
         return "stored"

@@ -1,0 +1,27 @@
+{
+  "backup_dir": "/Users/stephkev/Development/Project_Aladdin/cvat-ravens-mrktplc/integration/backups/20261030T223556Z",
+  "backup_seconds": 33.5,
+  "restore_seconds_to_api": 36.3,
+  "achieved_rpo_window_s": 33.5,
+  "matches_baseline": {
+    "portal_jobs": true,
+    "cvat_job_states": true,
+    "frame0_sha256": true,
+    "shapes_job0": true,
+    "cvat_task_id": true,
+    "slug": true,
+    "row_counts": true,
+    "all_tables_row_counts": true,
+    "alembic_revision": true,
+    "dataset_version": true,
+    "manifest_object_matches_recorded_sha256": true,
+    "write_barrier_holds": true
+  },
+  "reconcile_after_restore": {
+    "checked": 0,
+    "changed": 0,
+    "missing": 0,
+    "errors": 0
+  },
+  "all_match": true
+}

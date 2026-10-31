@@ -7,3 +7,6 @@ __pycache__/
 !*.env.example
 fixtures/generated/
 backups/
+
+# runtime data from the local object store (drills, dev send-offs)
+var/

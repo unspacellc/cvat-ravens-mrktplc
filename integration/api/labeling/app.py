@@ -2,12 +2,17 @@
 
 from __future__ import annotations
 
+import logging
+
 from fastapi import FastAPI, HTTPException, Request
 from sqlalchemy import text
 
 from . import routes, webhooks
 from .config import Settings
+from .cvat_client import CvatError
 from .db import make_engine, make_session_factory
+
+log = logging.getLogger(__name__)
 
 
 def create_app(settings: Settings | None = None, session_factory=None, *, identity=None, ctx=None) -> FastAPI:
@@ -37,5 +42,16 @@ def create_app(settings: Settings | None = None, session_factory=None, *, identi
         @app.exception_handler(routes.ApiError)
         async def _api_error(request: Request, exc: routes.ApiError):
             return routes.error_response(request, exc)
+
+        @app.exception_handler(CvatError)
+        async def _cvat_error(request: Request, exc: CvatError):
+            # The editor backend failed. Nothing was committed (the request's DB session rolls back), so the caller may simply retry.
+            # CVAT's own message can contain internals, so it is logged, never returned.
+            log.warning("cvat error on %s %s: %s", request.method, request.url.path, exc)
+            retryable = exc.retryable
+            return routes.error_response(request, routes.ApiError(
+                503 if retryable else 502, "editor_unavailable" if retryable else "editor_error",
+                "The editor service is unavailable right now. Nothing was changed; try again shortly." if retryable
+                else "The editor service rejected the request. Nothing was changed.", {"retryable": retryable}))
 
     return app

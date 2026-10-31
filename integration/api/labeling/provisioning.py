@@ -164,6 +164,22 @@ def provision_batch(ctx: Ctx):
     return handler
 
 
+def rotate_webhook_secrets(session: Session, ctx: Ctx, *, tenant_id: str | None = None) -> dict:
+    """Re-key every tenant's CVAT webhook with the secret derived from the CURRENT master secret. Run after changing the master
+    (with LABELING_WEBHOOK_PREVIOUS_MASTER_SECRET set to the old value so deliveries keep verifying meanwhile). Safe to repeat."""
+    done, failed = 0, []
+    q = select(TenantCvatOrg).where(TenantCvatOrg.cvat_instance == ctx.settings.cvat_instance, TenantCvatOrg.cvat_webhook_id.is_not(None))
+    if tenant_id:
+        q = q.where(TenantCvatOrg.tenant_id == tenant_id)
+    for org in session.scalars(q):
+        try:
+            ctx.cvat.set_webhook_secret(org.cvat_org_slug, org.cvat_webhook_id, ctx.settings.tenant_webhook_secret(org.tenant_id))
+            done += 1
+        except CvatError as e:
+            failed.append({"tenant_id": org.tenant_id, "error": str(e)[:200]})
+    return {"rotated": done, "failed": failed}
+
+
 def cleanup_failed_tasks(session: Session, ctx: Ctx, batch_id) -> int:
     """Explicit recovery: delete CVAT tasks of failed portal tasks and reset them for re-provisioning."""
     batch = session.get(LabelingBatch, batch_id)

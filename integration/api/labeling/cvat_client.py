@@ -64,6 +64,9 @@ class CvatClient:
             "target_url": target_url, "type": "organization", "content_type": "application/json",
             "events": events, "secret": secret, "is_active": True, "enable_ssl": False}).json()
 
+    def set_webhook_secret(self, org: str, hook_id: int, secret: str) -> None:
+        self._req("PATCH", f"/api/webhooks/{hook_id}", org=org, json={"secret": secret})
+
     # --- tasks -------------------------------------------------------------------
     def find_task_by_name(self, org: str, name: str) -> dict | None:
         flt = json.dumps({"==": [{"var": "name"}, name]})

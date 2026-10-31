@@ -24,9 +24,21 @@ class Settings:
     reconcile_interval_s: int = field(default_factory=lambda: int(os.environ.get("LABELING_RECONCILE_INTERVAL_S", "300")))
     segment_size: int = field(default_factory=lambda: int(os.environ.get("LABELING_SEGMENT_SIZE", "300")))
 
+    # During a rotation only: deliveries signed with the old master are still accepted until every tenant's webhook is re-keyed.
+    webhook_previous_master_secret: str = field(default_factory=lambda: os.environ.get("LABELING_WEBHOOK_PREVIOUS_MASTER_SECRET", ""))
+
+    @staticmethod
+    def _derive(master: str, tenant_id: str) -> str:
+        return hmac.new(master.encode(), f"cvat-webhook:{tenant_id}".encode(), hashlib.sha256).hexdigest()
+
     def tenant_webhook_secret(self, tenant_id: str) -> str:
         """Per-tenant webhook secret derived from the master secret (never stored). CVAT caps secrets at 64 chars."""
-        return hmac.new(self.webhook_master_secret.encode(), f"cvat-webhook:{tenant_id}".encode(), hashlib.sha256).hexdigest()
+        return self._derive(self.webhook_master_secret, tenant_id)
+
+    def tenant_webhook_secrets(self, tenant_id: str) -> list[str]:
+        """Secrets a delivery may be signed with: the current one, plus the previous one while a rotation is in progress."""
+        previous = [self._derive(self.webhook_previous_master_secret, tenant_id)] if self.webhook_previous_master_secret else []
+        return [self.tenant_webhook_secret(tenant_id), *previous]
 
 
 def org_slug_for(tenant_id: str) -> str:
