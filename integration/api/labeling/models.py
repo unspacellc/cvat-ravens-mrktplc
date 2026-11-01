@@ -195,9 +195,10 @@ class WebhookInbox(Base):
 
 
 class Outbox(Base):
-    """Mirrors the marketplace `outbox_events` columns so incorporation is a table move."""
+    """Same event shape as the marketplace `outbox_events` plus `tenant_id`. Named apart because that table already exists there
+    with different columns; at incorporation a relay copies rows across, it is not a table move."""
 
-    __tablename__ = "outbox_events"
+    __tablename__ = "labeling_outbox"
     id: Mapped[uuid.UUID] = _uuid_pk()
     tenant_id: Mapped[str] = mapped_column(String(128), nullable=False)
     aggregate_type: Mapped[str] = mapped_column(String(64), nullable=False)

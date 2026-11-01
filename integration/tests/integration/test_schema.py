@@ -28,7 +28,7 @@ def test_migration_roundtrip(db_url):
     command.downgrade(cfg, "base")
     assert "labeling_job" not in inspect(create_engine(db_url)).get_table_names()
     command.upgrade(cfg, "head")
-    assert {"labeling_job", "operation", "webhook_inbox", "outbox_events", "tenant_cvat_org"} <= set(inspect(create_engine(db_url)).get_table_names())
+    assert {"labeling_job", "operation", "webhook_inbox", "labeling_outbox", "tenant_cvat_org"} <= set(inspect(create_engine(db_url)).get_table_names())
 
 
 def test_cross_tenant_schema_reference_rejected(session):

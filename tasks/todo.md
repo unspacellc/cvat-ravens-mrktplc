@@ -180,3 +180,34 @@ Scope constraints (owner: proof of concept; pre-labeling deferred): no real-AWS 
 - Evidence: `docs/phases/evidence/load-design-point-2026-10-30.json`, `restore-drill-2026-10-30.json`.
 - Backlog added: production-host load run, narrower CVAT service account, alert delivery, rate limiting, tenant offboarding decision, real CVAT upgrade rehearsal.
 - Lesson: when a test passes alone and fails in the suite, look at accumulated external state before the test code. The count (973 hooks) and the worker log rate found it in two commands.
+
+## Phase 7 plan (2026-10-31): marketplace incorporation package, rehearsed in an isolated worktree
+
+Target: `../frontend/unspaced` (yarn workspaces `packages/api` FastAPI+SQLAlchemy sync, `packages/web` React Router 7). Alembic head `b7e2c4d6f810`. Rehearsal runs in a `git worktree` off `dev`; the user's checkout is not touched. No deploy.
+
+Decisions (owner answered 2026-10-31: D1 yes, D2 yes, D3 yes, D4 yes):
+- D1. Output location. Proposed: `s3://{bucket}/{org-uuid}/labeling/datasets/{batch}/{version}/` via `URIGenerator`/`parse_storage_uri` conventions (org-level, not yard-level, because batches are per organization). The existing `ground-truth/{video_hash}/...` prefix is global and not tenant-siloed; the labeling module will not reuse it.
+- D2. Feature flag. The marketplace has no flag system. Proposed: `labeling_enabled` setting (global kill switch) plus a per-customer allow-list (customer ids in settings); off = router not registered and nav item hidden.
+- D3. Media/model catalog. Media: adapt `Mission`/`StoredFile` per customer. Models: no catalog exists, so use the model_type strings; pre-labeling is deferred, so the model catalog adapter stays a stub that returns no models.
+- D4. Commit trailer. The marketplace CLAUDE.md forbids AI attribution in commits; the session reminder asks for a trailer. Proposed: follow the marketplace rule in that repo, trailer only in this repo.
+
+Steps -> verify:
+1. Fresh-checkout build of the standalone release from documented commands -> a clean clone builds and starts; record the commands in `docs/runbooks/standalone-release.md`.
+2. Create the worktree and a `feat/labeling` branch in the marketplace -> `git worktree list`; `alembic heads` shows one head.
+3. File-by-file incorporation manifest + config/secret/IAM inventory (docs/phases/phase-7.md) -> every file has a destination path; every setting has an owner.
+4. API module: copy `api/labeling` to `packages/api/src/...`, rebind identity (`get_current_user` + `get_effective_customer_id`, replacing JWKS + `labeling_member`), error envelope check, audit via `AuditLogService`, outbox rows in `outbox_events` -> ruff (line 120, module-scope imports) clean; unit tests; tenant isolation tests.
+5. Migrations: rebase the six labeling migrations onto `b7e2c4d6f810`, single head, down migrations -> clean install, upgrade from a populated copy of the marketplace DB, downgrade round trip.
+6. Publication adapter: DatasetPublisher writes to the D1 location through marketplace S3 helpers (MinIO locally) -> publish one version, verify manifest sha and key prefix.
+7. Web: move feature modules into `packages/web/app` (`$yardId.labeling*`/`labeling.*` routes, `api.labeling.*` BFF proxies using `createAuthenticatedAPIClient`, sidebar entry gated by flag), drop standalone host/login -> typecheck, lint, jest, build.
+8. Regression + flag: flag off = routes and nav absent, existing tests unchanged; flag on for an allowed tenant -> targeted existing suites (auth, tenant isolation, ground-truth) pass.
+9. End-to-end from the marketplace shell through real CVAT: manual-only batch publishes exactly one immutable version; frame/time identity preserved; existing ground-truth save still works -> e2e script with evidence.
+10. Release artifacts: pins, checksums, licences/notices, feature-flag rollout plan, deployment order, rollback, changelog fragments (`packages/api/changelog.d/*.feature`), MINOR bump proposal (VERSION files by hand; `bump-version.sh` is missing) -> manifest checksums verify.
+11. Phase 7 record with the definition-of-ready checklist, honest gaps (AWS pre-labeled batch gate cannot be met: pre-labeling deferred), standalone harness marked dev-only -> reviewed.
+
+Known gate gap: "AWS-pre-labeled batch publishes one version" requires pre-labeling, deferred by the owner; will be recorded as unmet, not mocked.
+
+Phase 7 progress:
+- Step 2 done: worktree `../frontend/unspaced-labeling-rehearsal`, branch `feat/labeling-incorporation` off `dev` (eed885ee).
+- Collision found: our `outbox_events` has the marketplace's table name with different columns (adds `tenant_id`). Renamed to `labeling_outbox` (migration 0007, model, test). 20 schema/migration/send-off tests pass.
+- Still to review for namespace hygiene at step 5: unprefixed tables `operation`, `webhook_inbox`, `dataset_version`, `review_event`, `review_issue`, `annotation_snapshot`, `prelabel_*`, `tenant_cvat_org`, `cvat_identity_mapping`, `label_schema_version` (no collision today).
+- Our models use their own `DeclarativeBase`; the marketplace uses one `declarative_base()` in `src/models/base.py` that Alembic env reads. Incorporated models must register on that Base or autogenerate will try to drop the tables.
