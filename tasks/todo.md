@@ -217,3 +217,29 @@ Phase 7 progress:
   - Six migrations rebased onto `b7e2c4d6f810` (ids `c4a1b0e10001`..`06`), outbox table created as `labeling_outbox` from the start. Verified on a scratch Postgres: full clean `alembic upgrade head` (marketplace + labeling), downgrade to `b7e2c4d6f810` removes only labeling tables and leaves marketplace `outbox_events` intact, re-upgrade works, single head, `alembic check` reports no drift on labeling tables (it does report existing marketplace drift such as `audit_reports`).
   - ruff check + format clean under the marketplace config (line 120, PLC0415 etc.); 15 deferred imports and 2 ffmpeg calls carry justified `noqa`.
   - NOT yet done: upgrade test from a populated representative marketplace DB; ctx adapters (media from missions/StoredFile, S3 write-once store under `{org}/labeling/datasets/...`, publisher, clip source); `register_routers` hook; marketplace-side tests (tenant isolation, flag off); ported unit tests; web port; end-to-end; release artifacts.
+
+### Phase 7 status and open items (2026-11-01)
+
+Done (worktree `../frontend/unspaced-labeling-rehearsal`, branch `feat/labeling-incorporation`, commits 5c73cd41 and 1a0415a4; this repo 30a6e09b0):
+- [x] Org-first object keys `{org}/labeling/...` in the module (standalone suite 138 passed, 1 skipped).
+- [x] API module, migrations rebased onto `b7e2c4d6f810` (plus `labeling_media_ref`), single head, clean install / downgrade / re-upgrade verified, no drift on labeling tables.
+- [x] Marketplace identity binding, feature flag + allow-list, S3 write-once store, clip source, media catalog, publisher (outbox_events + audit_logs), router hook. Flag off: 0 labeling routes; on: 28.
+- [x] Marketplace tests: 11 new (tenant isolation, roles, flag, publisher idempotency, write-once store); full marketplace API suite 1143 passed; ruff check and format clean.
+
+Open items, in priority order:
+- [ ] **HIGH** Web port into `packages/web/app` (`labeling.*` routes, `api.labeling.*` BFF proxies via `createAuthenticatedAPIClient`, sidebar entry gated by the flag, drop standalone login/host); typecheck, lint, jest, build.
+- [ ] **HIGH** End-to-end from the marketplace shell through real CVAT: manual-only batch publishes exactly one immutable version; frame/time identity preserved; upload a clip as a real `StoredFile` in MinIO first (the S3 store and catalog are only unit-tested with fakes so far).
+- [ ] **HIGH** Regression: marketplace auth, tenant switching, navigation and the ground-truth save flow with the flag off and on (API suite passes; web/Playwright checks not run).
+- [ ] **HIGH** Upgrade test from a populated representative marketplace database (only a clean install and an empty-then-upgrade have been run).
+- [ ] **HIGH** Incorporation manifest (file by file), config/secret/IAM inventory, deployment order, rollback notes, feature-flag rollout plan, release checksums, licences/notices, VERSION bump proposal (MINOR for api and web; edit VERSION by hand, `bump-version.sh` is missing), `docs/phases/phase-7.md` with the definition-of-ready checklist.
+- [ ] **HIGH** Worker process: provisioning/reconcile/webhook workers (`workers/run.py`) need a marketplace deployment unit (ECS task) and the CVAT webhook route reachable from CVAT; not packaged yet.
+- [ ] **NORMAL** Bucket policy denying overwrite/delete on `*/labeling/*` for the application role (the code uses conditional PUT; the policy is what makes it immutable). Needs an IAM owner.
+- [ ] **NORMAL** Backfill/indexing job for media references (`MarketplaceMediaCatalog.index_tenant`); listing probes at most 3 new clips per call. Needs a script or worker and a decision on telemetry (.srt) sidecars (currently reported as `missing`).
+- [ ] **NORMAL** Table-name hygiene: prefix generic tables (`operation`, `dataset_version`, `webhook_inbox`, `review_event`, `review_issue`, `annotation_snapshot`, `prelabel_*`, `tenant_cvat_org`, `cvat_identity_mapping`, `label_schema_version`) with `labeling_`; no collision today.
+- [ ] **NORMAL** Superadmin cross-customer access to labeling (the binding resolves memberships only; no tenant hopping).
+- [ ] **NORMAL** Existing-data adoption procedure (dry-run mapping/import); default is no automatic backfill.
+- [ ] **NORMAL** Authoritative `labeling_member` management UI/endpoints for customer admins (today roles are rows seeded by script or admin API).
+- [ ] **LOW** Model catalog adapter (returns no models; pre-labeling deferred). Pre-label limits ($300/month, $50/batch) to apply when it starts.
+- [ ] **LOW** AWS-pre-labeled batch gate of the Phase 7 definition of ready: UNMET by decision (pre-labeling deferred); record, do not mock.
+- [ ] **LOW** CVAT editor sign-in against Cognito (needs the `labeling-cvat-editor-dev` app client created by a human; `scripts/verify_cvat_signin.py`).
+- [ ] **LOW** Carry-over from Phase 6: production-host load run, narrower CVAT service account, alert delivery, per-tenant rate limiting, tenant offboarding, real CVAT upgrade rehearsal, secret rotation rehearsal for the CVAT token / marketplace key / Cognito.
