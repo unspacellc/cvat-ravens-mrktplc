@@ -18,7 +18,7 @@ from referencing import Registry, Resource
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from . import operations, review
+from . import keys, operations, review
 from .framemap import FrameMap
 from .models import (
     AnnotationSnapshot,
@@ -192,7 +192,7 @@ def send_off(ctx: Ctx):
         org = session.get(TenantCvatOrg, (batch.tenant_id, ctx.settings.cvat_instance))
         rows = _batch_rows(session, batch.tenant_id, batch.id)
         tasks = list({t.id: t for _, t in rows}.values())
-        prefix = f"datasets/{batch.tenant_id}/{batch.id}/{dv.id}"
+        prefix = keys.dataset_prefix(batch.tenant_id, str(batch.id), str(dv.id))
 
         if "frozen" not in op.progress:  # 1. write barrier (waits for in-flight writers; rejects every later one)
             for t in tasks:

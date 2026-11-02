@@ -22,7 +22,7 @@ from PIL import Image
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from . import operations, review, transforms
+from . import keys, operations, review, transforms
 from .framemap import FrameMap
 from .inference import PollResult
 from .models import (
@@ -235,8 +235,8 @@ def _advance(session: Session, ctx: Ctx, run: PrelabelRun) -> bool:
             if c.status == "pending":
                 c.inference_id = _inference_id(run, c)
             continue
-        c.raw_uri = _put(ctx, f"prelabel/{run.tenant_id}/{run.id}/raw/{c.id}-{c.attempts}.json", res.output)
-        c.normalized_uri = _put(ctx, f"prelabel/{run.tenant_id}/{run.id}/normalized/{c.id}.json", json.dumps(preds, sort_keys=True).encode())
+        c.raw_uri = _put(ctx, keys.prelabel_key(run.tenant_id, str(run.id), "raw", f"{c.id}-{c.attempts}.json"), res.output)
+        c.normalized_uri = _put(ctx, keys.prelabel_key(run.tenant_id, str(run.id), "normalized", f"{c.id}.json"), json.dumps(preds, sort_keys=True).encode())
         for k, v in ctr.items():
             counters[k] += v
         c.status, c.error = "collected", None
@@ -255,7 +255,7 @@ def _advance(session: Session, ctx: Ctx, run: PrelabelRun) -> bool:
             wanted = {fmap.cvat_to_clip(k) for ch in chunks if ch.task_id == c.task_id and ch.status == "pending" for k in ch.frames}
             cache[c.task_id] = _decode_frames(clip, wanted, len(fmap.pts_s))
         payload = _chunk_payload(run, task, c, cache[c.task_id], fmap, tf)
-        c.input_uri = _put(ctx, f"prelabel/{run.tenant_id}/{run.id}/in/{c.id}-{c.attempts}.json", payload)
+        c.input_uri = _put(ctx, keys.prelabel_key(run.tenant_id, str(run.id), "in", f"{c.id}-{c.attempts}.json"), payload)
         backend.submit(inference_id=c.inference_id, payload=payload)  # raises on transport errors => op retries; same id => no duplicate
         c.status = "submitted"
         inflight += 1
@@ -288,7 +288,7 @@ def _import_task(session: Session, ctx: Ctx, run: PrelabelRun, task: LabelingTas
         session.commit()
         return {"status": "empty", "shapes": 0}
     baseline = json.dumps(preds, sort_keys=True).encode()
-    ledger.baseline_uri, ledger.baseline_sha256 = _put(ctx, f"prelabel/{run.tenant_id}/{run.id}/baseline/{task.id}.json", baseline), hashlib.sha256(baseline).hexdigest()
+    ledger.baseline_uri, ledger.baseline_sha256 = _put(ctx, keys.prelabel_key(run.tenant_id, str(run.id), "baseline", f"{task.id}.json"), baseline), hashlib.sha256(baseline).hexdigest()
     names = {v: k for k, v in ctx.cvat.task_labels(org.cvat_org_slug, task.cvat_task_id).items()}
     imported = 0
     for job in session.scalars(select(LabelingJob).where(LabelingJob.tenant_id == run.tenant_id, LabelingJob.task_id == task.id).order_by(LabelingJob.start_frame)):

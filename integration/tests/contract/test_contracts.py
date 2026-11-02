@@ -99,6 +99,7 @@ def test_legacy_coexistence_never_collides_with_versions_and_matches_legacy_key_
     key = legacy.legacy_manifest_key("abc123", "rail_defect")
     assert legacy.LEGACY_KEY_RE.match(key)
     assert not legacy.dataset_version_prefix("t1", "b", "v").startswith("ground-truth/")
+    assert legacy.dataset_version_prefix("t1", "b", "v") == "t1/labeling/datasets/b/v/"
     m = legacy.to_legacy_manifest(video_name="v.mp4", video_hash="abc123", model_type="rail_defect", run_id="r", saved_by="u",
                                   successes=[], failures=[], source_manifest_url="s3://x", source_output_prefix="s3://y/")
     assert {"videoName", "failures", "successes", "saved_by", "saved_at", "run_id", "model_type", "video_hash"} <= m.keys()

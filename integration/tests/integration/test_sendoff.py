@@ -85,7 +85,7 @@ def test_happy_path_publishes_one_immutable_version(ready):
         assert s.get(LabelingBatch, st.batch_id).lifecycle == "sent_off"
         assert {j.portal_state for j in s.scalars(select(LabelingJob).where(LabelingJob.tenant_id == st.tenant))} == {"sent_off"}
         with pytest.raises(ImmutableObjectError):  # published objects cannot be overwritten
-            st.ctx.store.put_if_absent(f"datasets/{st.tenant}/{st.batch_id}/{dv_id}/manifest.json", b"tampered")
+            st.ctx.store.put_if_absent(f"{st.tenant}/labeling/datasets/{st.batch_id}/{dv_id}/manifest.json", b"tampered")
     assert _counts(st) == (1, 1)
     # source jobs are non-editable server-side, even for a fresh superuser request
     with st.sf() as s:

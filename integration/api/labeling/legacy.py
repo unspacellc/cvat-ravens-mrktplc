@@ -10,12 +10,13 @@ from __future__ import annotations
 import re
 from datetime import UTC, datetime
 
+from .keys import dataset_prefix
+
 LEGACY_KEY_RE = re.compile(r"^ground-truth/[^/]+/[a-z_]+/[a-z_]+_groundtruth_manifest_\d{8}_\d{6}(_\d+)?\.json$")
-VERSION_KEY_PREFIX = "labeling"
 
 
 def dataset_version_prefix(tenant_id: str, batch_id: str, dataset_version_id: str) -> str:
-    return f"{VERSION_KEY_PREFIX}/{tenant_id}/{batch_id}/{dataset_version_id}/"
+    return dataset_prefix(tenant_id, batch_id, dataset_version_id) + "/"
 
 
 def legacy_manifest_key(video_hash: str, model_type: str, now: datetime | None = None) -> str:

@@ -17,6 +17,7 @@ from dataclasses import dataclass, field
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from . import keys
 from .adapters import Principal
 from .cvat_client import CvatError
 from .models import (
@@ -72,7 +73,7 @@ def canonical_snapshot(ctx: Ctx, slug: str, job: LabelingJob, task: LabelingTask
 
 def take_snapshot(session: Session, ctx: Ctx, job: LabelingJob, task: LabelingTask, slug: str, reason: str) -> AnnotationSnapshot:
     data, sha = canonical_snapshot(ctx, slug, job, task)
-    uri, _ = ctx.store.put_if_absent(f"snapshots/{job.tenant_id}/{job.id}/{sha}.json", data)
+    uri, _ = ctx.store.put_if_absent(keys.snapshot_key(job.tenant_id, str(job.id), sha), data)
     snap = AnnotationSnapshot(tenant_id=job.tenant_id, job_id=job.id, annotation_revision=job.annotation_revision, reason=reason,
                               format=SNAPSHOT_FORMAT, uri=uri, sha256=sha, bytes=len(data))
     session.add(snap)
